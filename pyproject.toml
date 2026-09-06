@@ -57,6 +57,7 @@ all = [
 
 [project.scripts]
 dpsprep = "dpsprep.cli:dpsprep"
+dpsprep-gui = "dpsprep_desktop.app:main"
 
 [dependency-groups]
 lint = [
@@ -103,6 +104,7 @@ backend-path = ["src"]
 resolution = "lowest-direct"
 
 [tool.uv.build-backend]
+module-name = ["dpsprep", "dpsprep_desktop"]
 source-include = ["CHANGELOG.md", "REUSE.toml", "src/helpers/*", "docs/examples.man", "fixtures/*"]
 source-exclude = ["dist"]
 data = { data = "dist/data" }

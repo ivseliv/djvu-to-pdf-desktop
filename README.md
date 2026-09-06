@@ -12,6 +12,7 @@ The name comes from Sony's Digital Paper System (DPS), for which the tool was in
 ## Table of contents
 
 * [Usage](#usage)
+* [Desktop app](#desktop-app)
 * [Installation](#installation)
 * [Project setup](#project-setup)
 
@@ -44,6 +45,23 @@ In case we want to preserve the cover page as-is, we can use ranges:
     dpsprep --mode bitonal[2-end] input.djvu start.pdf
 
 For details on these and other options, as well as the allowed range syntax, consult the man page (included in the wheels, also avaiable [online](https://github.com/kcroker/dpsprep/wiki/dpsprep.1)).
+
+## Desktop app
+
+This fork includes a native, offline Tk desktop application with a Russian
+interface.  It converts a DjVu document to PDF while preserving the existing
+searchable text layer and outline where they exist in the source.  It does not
+perform OCR.
+
+For local development, run:
+
+    uv run dpsprep-gui
+
+The macOS application and detailed packaging notes are in
+[`desktop/README.md`](desktop/README.md).  Modern Windows x64 has a separate
+native-runtime build contract in
+[`desktop/windows/README.md`](desktop/windows/README.md).  Windows XP is not
+supported by the modern build and is planned as a distinct legacy edition.
 
 ## Installation
 
