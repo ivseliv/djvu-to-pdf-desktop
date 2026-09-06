@@ -75,7 +75,7 @@ def open_djvu_document(source: str) -> object:
 @click.option('-q', '--quality', 'quality_overrides', type=QualityOverridesClickType(), multiple=True, default=[], help="Determine the quality of images in output. Valid values range between 1 and 100. Used only for JPEG compression, i.e. RGB and Grayscale images. Passed directly to Pillow and to OCRmyPDF's optimizer.")
 @click.option('--dpi', 'dpi_overrides', type=DpiOverridesClickType(), multiple=True, default=[], help='Override the DPI values encoded in the DjVu file for individual pages.')
 @click.option('-m', '--mode', 'mode_overrides', type=ImageModeOverridesClickType(), multiple=True, default=['infer'], help='Override the image modes encoded in the DjVu file for individual pages. Valid values are "infer" (default), "bitonal", "grayscale" and "rgb". It sometimes makes sense to force bitonal images since they compress well.')
-@click.version_option()
+@click.version_option(version='2.8.3')
 @click.argument('dest', type=click.Path(exists=False, dir_okay=False, resolve_path=True), required=False)
 @click.argument('src', type=click.Path(exists=True, dir_okay=False, resolve_path=True), required=True)
 @click.command(epilog='See dpsprep(1) for more details.')

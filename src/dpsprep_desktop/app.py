@@ -39,6 +39,7 @@ MODE_HINTS = {
     "rgb": "Для книг с цветными иллюстрациями и фотографиями.",
 }
 PROGRESS_PREFIX = "__DPSPREP_PROGRESS__ "
+COMBINE_PROGRESS_PREFIX = "__DPSPREP_COMBINE_PROGRESS__ "
 
 
 class ConverterApp(ttk.Frame):
@@ -319,6 +320,12 @@ class ConverterApp(ttk.Frame):
                         self.events.put(("progress", (int(completed), int(total))))
                     except ValueError:
                         self.events.put(("log", line))
+                elif line.startswith(COMBINE_PROGRESS_PREFIX):
+                    try:
+                        completed, total = line.removeprefix(COMBINE_PROGRESS_PREFIX).strip().split("/", maxsplit=1)
+                        self.events.put(("combine", (int(completed), int(total))))
+                    except ValueError:
+                        self.events.put(("log", line))
                 else:
                     self.events.put(("log", line))
             return_code = self.process.wait()
@@ -348,8 +355,13 @@ class ConverterApp(ttk.Frame):
                     self.status.set(str(value))
                 elif kind == "progress":
                     completed, total = value
-                    self.progress_value.set(100 * completed / total if total else 0)
+                    self.progress_value.set(65 * completed / total if total else 0)
                     self.progress_text.set(f"Страницы: {completed:,} из {total:,} · {100 * completed / total:.1f}%")
+                elif kind == "combine":
+                    completed, total = value
+                    self.status.set("Собираю PDF…")
+                    self.progress_value.set(65 + 35 * completed / total if total else 65)
+                    self.progress_text.set(f"Сборка PDF: блок {completed:,} из {total:,}")
                 else:
                     return_code = int(value)
                     self.process = None

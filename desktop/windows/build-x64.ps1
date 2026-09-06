@@ -89,7 +89,7 @@ Invoke-VenvPython -m pip install --upgrade pip
 Invoke-VenvPython -m pip install "pyinstaller>=6.12"
 Invoke-VenvPython -m pip install $BindingWheel
 Invoke-VenvPython -m pip install --no-deps $ProjectRoot
-Invoke-VenvPython -m pip install "click>=8" "fpdf2>=2.8.6" "pdfrw>=0.4" "pillow>=12.2.0" "rich>=13" "typing_extensions>=4.5"
+Invoke-VenvPython -m pip install "click>=8" "fpdf2>=2.8.6" "pdfrw>=0.4" "pikepdf>=10.5.1" "pillow>=12.2.0" "rich>=13" "typing_extensions>=4.5"
 
 $env:PATH = "$(Split-Path $DjVuLibreDll);$env:PATH"
 Invoke-VenvPython -c "import struct; import djvu.decode, djvu.sexpr; assert struct.calcsize('P') == 8; print('DjVu bindings imported successfully')"
@@ -108,6 +108,7 @@ Invoke-VenvPython -m PyInstaller `
     --collect-all dpsprep `
     --collect-all dpsprep_desktop `
     --collect-all djvu `
+    --collect-all pikepdf `
     --hidden-import djvu.decode `
     --hidden-import djvu.sexpr `
     (Join-Path $ProjectRoot "desktop\\launcher.py")

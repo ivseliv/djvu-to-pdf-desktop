@@ -2,6 +2,6 @@
 
 from .core import ConversionSettings, build_command, default_output_path
 
-__version__ = "0.1.6"
+__version__ = "0.1.7"
 
 __all__ = ["ConversionSettings", "__version__", "build_command", "default_output_path"]

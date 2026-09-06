@@ -1,6 +1,9 @@
 import pathlib
+import os
 
 import pdfrw
+import pikepdf
+from pdfrw.objects.pdfstring import PdfString
 
 from dpsprep.options import DpsPrepOptions
 
@@ -15,6 +18,12 @@ def is_valid_pdf(path: pathlib.Path) -> bool:
 
 
 CHUNK_SIZE = 64
+COMBINE_PROGRESS_PREFIX = '__DPSPREP_COMBINE_PROGRESS__ '
+
+
+def _report_combine_progress(completed: int, total: int) -> None:
+    if os.environ.get('DPSPREP_GUI_PROGRESS') == '1':
+        print(f'{COMBINE_PROGRESS_PREFIX}{completed}/{total}', flush=True)
 
 
 def _chunk_path(options: DpsPrepOptions, chunk_number: int) -> pathlib.Path:
@@ -22,23 +31,38 @@ def _chunk_path(options: DpsPrepOptions, chunk_number: int) -> pathlib.Path:
 
 
 def _write_chunks_to_destination(
-    chunks: list[pathlib.Path], destination: pathlib.Path, outline: pdfrw.IndirectPdfDict
+    chunks: list[pathlib.Path], destination: pathlib.Path, outline: pdfrw.IndirectPdfDict, progress_offset: int
 ) -> None:
-    """Join already assembled chunks without retaining an extra combined PDF.
+    """Join assembled chunks with QPDF without retaining another work PDF.
 
-    `pdfrw` writes a complete document at the end, so merging every page in a
-    single writer makes the temporary page PDFs and the final PDF coexist.  By
-    replacing a small batch of page PDFs with a chunk immediately, peak disk
-    use is roughly the chunks plus the final output, rather than pages,
-    combined output, and a copied destination all at once.
+    pdfrw reserializes all indirect objects during the final merge and is not
+    reliable for multi-gigabyte books. PikePDF is backed by QPDF and copies the
+    page objects directly. This keeps peak disk use to the chunks plus one
+    final output, instead of pages, a combined output, and a copied result.
     """
-    writer = pdfrw.PdfWriter()
-    for chunk in chunks:
-        chunk_pdf = pdfrw.PdfReader(chunk)
-        for page in chunk_pdf.pages:
-            writer.addpage(page)
-    writer.trailer.Root.Outlines = outline
-    writer.write(destination)
+    with pikepdf.Pdf.new() as output_pdf:
+        for chunk_number, chunk in enumerate(chunks, start=1):
+            with pikepdf.open(chunk) as chunk_pdf:
+                output_pdf.pages.extend(chunk_pdf.pages)
+            _report_combine_progress(progress_offset + chunk_number, progress_offset + len(chunks))
+
+        with output_pdf.open_outline() as output_outline:
+            output_outline.root.extend(_convert_outline_items(outline.First))
+
+        output_pdf.save(destination)
+
+
+def _convert_outline_items(node: pdfrw.PdfDict | None) -> list[pikepdf.OutlineItem]:
+    """Translate the existing DjVu-derived outline into QPDF bookmarks."""
+    items: list[pikepdf.OutlineItem] = []
+    while node is not None:
+        title = PdfString.decode(node.Title) if node.Title is not None else ''
+        destination = int(node.A.D[0]) if node.A is not None and node.A.D is not None else None
+        item = pikepdf.OutlineItem(title, destination, page_location='Fit')
+        item.children.extend(_convert_outline_items(node.First))
+        items.append(item)
+        node = node.Next
+    return items
 
 
 def _stream_pages_in_chunks(
@@ -51,6 +75,7 @@ def _stream_pages_in_chunks(
     """Build the final PDF in batches, releasing rendered page PDFs early."""
     text_pdf = pdfrw.PdfReader(options.workdir.text_layer_pdf_path) if with_text else None
     chunks: list[pathlib.Path] = []
+    total_chunks = (max_page + CHUNK_SIZE - 1) // CHUNK_SIZE
 
     for first_page in range(0, max_page, CHUNK_SIZE):
         last_page = min(first_page + CHUNK_SIZE, max_page)
@@ -76,8 +101,9 @@ def _stream_pages_in_chunks(
         for page_number in range(first_page, last_page):
             options.workdir.get_page_pdf_path(page_number).unlink(missing_ok=True)
         chunks.append(chunk_path)
+        _report_combine_progress(len(chunks), total_chunks * 2)
 
-    _write_chunks_to_destination(chunks, options.workdir.dest, outline)
+    _write_chunks_to_destination(chunks, options.workdir.dest, outline, total_chunks)
 
     for chunk in chunks:
         chunk.unlink(missing_ok=True)
