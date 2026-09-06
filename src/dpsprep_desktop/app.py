@@ -284,28 +284,22 @@ class ConverterApp(ttk.Frame):
 
     def _run(self, settings: ConversionSettings) -> None:
         staging_directory: Path | None = None
-        temporary_output: Path | None = None
         try:
-            # The worker writes straight to this adjacent temporary file and
-            # the GUI atomically renames it on success.  This avoids a second
-            # full-size copy of a large PDF during the final save.
-            descriptor, temporary_name = tempfile.mkstemp(
-                prefix=f".{settings.output.name}.", suffix=".partial", dir=settings.output.parent
-            )
-            os.close(descriptor)
-            temporary_output = Path(temporary_name)
-            worker_settings = replace(settings, output=temporary_output, overwrite=True)
+            worker_settings = settings
             if sys.platform == "darwin" and getattr(sys, "frozen", False):
                 # A file chosen in a macOS open dialog can be readable by this
                 # GUI process but not by the re-launched PyInstaller worker.
-                # Stage both endpoints so the worker only accesses its own
-                # temporary directory; the GUI then saves the finished PDF.
+                # Keep both endpoints in the staging directory, then let the
+                # GUI save the completed PDF using its dialog-granted access.
+                # Creating an arbitrary sibling of the selected destination
+                # can block under macOS privacy controls.
                 staging_directory = Path(tempfile.mkdtemp(prefix="djvu-to-pdf-"))
                 staged_source = staging_directory / f"source{settings.source.suffix.lower()}"
+                staged_output = staging_directory / "result.pdf"
                 self.events.put(("status", "Подготавливаю DjVu для конвертации…"))
                 self.events.put(("log", "macOS: копирую исходный DjVu во временную папку.\n"))
                 shutil.copy2(settings.source, staged_source)
-                worker_settings = replace(worker_settings, source=staged_source)
+                worker_settings = replace(worker_settings, source=staged_source, output=staged_output, overwrite=True)
 
             command = build_command(worker_settings)
             self.process = subprocess.Popen(
@@ -328,17 +322,14 @@ class ConverterApp(ttk.Frame):
                 else:
                     self.events.put(("log", line))
             return_code = self.process.wait()
-            if return_code == 0:
+            if return_code == 0 and staging_directory is not None:
                 self.events.put(("status", "Сохраняю готовый PDF…"))
-                temporary_output.replace(settings.output)
-                temporary_output = None
+                shutil.copy2(worker_settings.output, settings.output)
             self.events.put(("complete", return_code))
         except (OSError, shutil.Error) as error:
             self.events.put(("log", f"Не удалось запустить конвертер: {error}\n"))
             self.events.put(("complete", 1))
         finally:
-            if temporary_output is not None:
-                temporary_output.unlink(missing_ok=True)
             if staging_directory is not None:
                 shutil.rmtree(staging_directory, ignore_errors=True)
 
