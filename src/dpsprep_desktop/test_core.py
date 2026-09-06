@@ -3,6 +3,11 @@ from pathlib import Path
 import pytest
 
 from .core import ConversionSettings, build_command, default_output_path
+from . import __version__
+
+
+def test_desktop_version_is_semantic() -> None:
+    assert __version__.count(".") == 2
 
 
 def test_default_output_path() -> None:

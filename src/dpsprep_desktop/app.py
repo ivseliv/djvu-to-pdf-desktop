@@ -14,6 +14,7 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from . import __version__
 from .core import ConversionSettings, build_command, default_output_path
 
 
@@ -111,6 +112,23 @@ class ConverterApp(ttk.Frame):
         style.configure("Secondary.TButton", background="#E9EEF7", foreground="#2C3B4B", borderwidth=0, padding=(14, 9))
         style.map("Secondary.TButton", background=[("active", "#DDE5F2")])
         style.configure("TCheckbutton", background=SURFACE, foreground=INK, font=("Helvetica", 10))
+        self._install_menu()
+
+    def _install_menu(self) -> None:
+        menu_bar = tk.Menu(self.root)
+        app_menu = tk.Menu(menu_bar, name="apple", tearoff=False)
+        app_menu.add_command(label="О программе DjVu → PDF", command=self._show_about)
+        menu_bar.add_cascade(label="DjVu → PDF", menu=app_menu)
+        self.root.configure(menu=menu_bar)
+
+    def _show_about(self) -> None:
+        messagebox.showinfo(
+            "О программе",
+            f"DjVu → PDF\nВерсия {__version__}\n\n"
+            "Автономный конвертер DjVu в PDF\n"
+            "с сохранением существующего текстового слоя.",
+            parent=self.root,
+        )
 
     def _build(self) -> None:
         ttk.Label(self, text="DjVu → PDF", style="Header.TLabel").pack(anchor="w")
