@@ -7,6 +7,8 @@
 
 Convert DjVu files to PDF.
 
+This desktop-focused fork is based on [Kevin Croker's original dpsprep project](https://github.com/kcroker/dpsprep).
+
 The name comes from Sony's Digital Paper System (DPS), for which the tool was initially developed - see [below](#kevins-notes-regarding-the-first-version).
 
 ## Table of contents
