@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+import os
 from pathlib import Path
 import queue
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -228,6 +232,8 @@ class ConverterApp(ttk.Frame):
             command = build_command(settings)
             if not settings.source.is_file():
                 raise ValueError("Выберите существующий DjVu-файл.")
+            if settings.output.exists() and not settings.overwrite:
+                raise ValueError("PDF с таким именем уже существует.")
         except ValueError as error:
             messagebox.showerror("Не удалось начать", str(error), parent=self.root)
             return
@@ -235,18 +241,62 @@ class ConverterApp(ttk.Frame):
         self.status.set("Идёт конвертация…")
         self.convert_button.configure(state="disabled")
         self.cancel_button.configure(state="normal")
-        threading.Thread(target=self._run, args=(command,), daemon=True).start()
+        threading.Thread(target=self._run, args=(settings,), daemon=True).start()
 
-    def _run(self, command: list[str]) -> None:
+    def _run(self, settings: ConversionSettings) -> None:
+        staging_directory: Path | None = None
+        temporary_output: Path | None = None
         try:
-            self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+            worker_settings = settings
+            if sys.platform == "darwin" and getattr(sys, "frozen", False):
+                # A file chosen in a macOS open dialog can be readable by this
+                # GUI process but not by the re-launched PyInstaller worker.
+                # Stage both endpoints so the worker only accesses its own
+                # temporary directory; the GUI then saves the finished PDF.
+                staging_directory = Path(tempfile.mkdtemp(prefix="djvu-to-pdf-"))
+                staged_source = staging_directory / f"source{settings.source.suffix.lower()}"
+                staged_output = staging_directory / "result.pdf"
+                self.events.put(("status", "Подготавливаю DjVu для конвертации…"))
+                self.events.put(("log", "macOS: копирую исходный DjVu во временную папку.\n"))
+                shutil.copy2(settings.source, staged_source)
+                worker_settings = replace(settings, source=staged_source, output=staged_output, overwrite=True)
+
+            command = build_command(worker_settings)
+            self.process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
             assert self.process.stdout is not None
             for line in self.process.stdout:
                 self.events.put(("log", line))
-            self.events.put(("complete", self.process.wait()))
-        except OSError as error:
+            return_code = self.process.wait()
+            if return_code == 0 and staging_directory is not None:
+                self.events.put(("status", "Сохраняю готовый PDF…"))
+                descriptor, temporary_name = tempfile.mkstemp(
+                    prefix=f".{settings.output.name}.", suffix=".tmp", dir=settings.output.parent
+                )
+                temporary_output = Path(temporary_name)
+                try:
+                    shutil.copy2(worker_settings.output, temporary_output)
+                finally:
+                    # copy2 opens the path itself; close the descriptor created
+                    # by mkstemp before moving the completed file into place.
+                    os.close(descriptor)
+                temporary_output.replace(settings.output)
+                temporary_output = None
+            self.events.put(("complete", return_code))
+        except (OSError, shutil.Error) as error:
             self.events.put(("log", f"Не удалось запустить конвертер: {error}\n"))
             self.events.put(("complete", 1))
+        finally:
+            if temporary_output is not None:
+                temporary_output.unlink(missing_ok=True)
+            if staging_directory is not None:
+                shutil.rmtree(staging_directory, ignore_errors=True)
 
     def _cancel(self) -> None:
         if self.process and self.process.poll() is None:

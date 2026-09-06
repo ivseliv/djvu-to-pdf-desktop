@@ -38,6 +38,7 @@ DjVuLibre runtime as well as the Python bindings; test it on a clean machine.
 
 ```console
 uv run --with 'pyinstaller>=6.12' pyinstaller --noconfirm --windowed --name "DjVu to PDF" \
+  --add-data 'LICENSES:LICENSES' \
   --collect-all dpsprep --collect-all dpsprep_desktop --collect-all djvu \
   desktop/launcher.py
 ```
