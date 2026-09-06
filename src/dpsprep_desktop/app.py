@@ -71,7 +71,7 @@ class ConverterApp(ttk.Frame):
         self.progress_value = tk.DoubleVar(value=0)
         self.progress_text = tk.StringVar(value="")
         self.mode_hint = tk.StringVar(value=MODE_HINTS["infer"])
-        self.events: queue.Queue[tuple[str, str | int]] = queue.Queue()
+        self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.process: subprocess.Popen[str] | None = None
 
         self._build()
@@ -260,7 +260,7 @@ class ConverterApp(ttk.Frame):
             pool_size = int(pool_text) if pool_text else None
         except ValueError as error:
             raise ValueError("Число процессов должно быть целым числом.") from error
-        return ConversionSettings(source=Path(self.source.get()), output=Path(self.output.get()), preserve_text=self.keep_text.get(), image_mode=MODE_LABELS[self.mode_label.get()], quality=self.quality.get(), pool_size=pool_size, overwrite=self.overwrite.get())
+        return ConversionSettings(source=Path(self.source.get()), output=Path(self.output.get()), preserve_text=self.keep_text.get(), image_mode=MODE_LABELS[self.mode_label.get()], quality=self.quality.get(), pool_size=pool_size, overwrite=self.overwrite.get(), stream_output=True)
 
     def _start(self) -> None:
         try:
@@ -286,7 +286,15 @@ class ConverterApp(ttk.Frame):
         staging_directory: Path | None = None
         temporary_output: Path | None = None
         try:
-            worker_settings = settings
+            # The worker writes straight to this adjacent temporary file and
+            # the GUI atomically renames it on success.  This avoids a second
+            # full-size copy of a large PDF during the final save.
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f".{settings.output.name}.", suffix=".partial", dir=settings.output.parent
+            )
+            os.close(descriptor)
+            temporary_output = Path(temporary_name)
+            worker_settings = replace(settings, output=temporary_output, overwrite=True)
             if sys.platform == "darwin" and getattr(sys, "frozen", False):
                 # A file chosen in a macOS open dialog can be readable by this
                 # GUI process but not by the re-launched PyInstaller worker.
@@ -294,11 +302,10 @@ class ConverterApp(ttk.Frame):
                 # temporary directory; the GUI then saves the finished PDF.
                 staging_directory = Path(tempfile.mkdtemp(prefix="djvu-to-pdf-"))
                 staged_source = staging_directory / f"source{settings.source.suffix.lower()}"
-                staged_output = staging_directory / "result.pdf"
                 self.events.put(("status", "Подготавливаю DjVu для конвертации…"))
                 self.events.put(("log", "macOS: копирую исходный DjVu во временную папку.\n"))
                 shutil.copy2(settings.source, staged_source)
-                worker_settings = replace(settings, source=staged_source, output=staged_output, overwrite=True)
+                worker_settings = replace(worker_settings, source=staged_source)
 
             command = build_command(worker_settings)
             self.process = subprocess.Popen(
@@ -321,18 +328,8 @@ class ConverterApp(ttk.Frame):
                 else:
                     self.events.put(("log", line))
             return_code = self.process.wait()
-            if return_code == 0 and staging_directory is not None:
+            if return_code == 0:
                 self.events.put(("status", "Сохраняю готовый PDF…"))
-                descriptor, temporary_name = tempfile.mkstemp(
-                    prefix=f".{settings.output.name}.", suffix=".tmp", dir=settings.output.parent
-                )
-                temporary_output = Path(temporary_name)
-                try:
-                    shutil.copy2(worker_settings.output, temporary_output)
-                finally:
-                    # copy2 opens the path itself; close the descriptor created
-                    # by mkstemp before moving the completed file into place.
-                    os.close(descriptor)
                 temporary_output.replace(settings.output)
                 temporary_output = None
             self.events.put(("complete", return_code))

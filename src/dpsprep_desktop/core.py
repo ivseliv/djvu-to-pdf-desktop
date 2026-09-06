@@ -27,6 +27,7 @@ class ConversionSettings:
     quality: int = 50
     pool_size: int | None = None
     overwrite: bool = True
+    stream_output: bool = False
 
     def validate(self) -> None:
         if self.source.suffix.lower() not in {".djvu", ".djv"}:
@@ -71,6 +72,8 @@ def build_command(
 
     if settings.overwrite:
         command.append("--overwrite")
+    if settings.stream_output:
+        command.append("--stream-to-dest")
     if settings.pool_size is not None:
         command.extend(("--pool-size", str(settings.pool_size)))
 

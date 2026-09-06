@@ -31,6 +31,12 @@ The source DjVu's existing text layer and bookmarks are retained by default.
 The desktop interface does not perform OCR or run PDF optimization: it only
 transfers the searchable source layer into the generated PDF.
 
+For large files, the desktop worker assembles page PDFs in batches of 64 and
+writes the result directly to a temporary file beside the selected destination.
+This avoids keeping three full PDF copies at once. The GUI removes its working
+directory after either a successful conversion or a failure, including an
+out-of-space error.
+
 ## Release packaging
 
 Build each platform on that platform. A frozen app must ship a 64-bit

@@ -37,6 +37,14 @@ def test_build_command_accepts_the_frozen_app_worker_prefix() -> None:
     assert command[:4] == ["DjVu to PDF", "--run-dpsprep", "--overwrite", "--mode"]
 
 
+def test_build_command_can_request_the_space_efficient_desktop_pipeline() -> None:
+    command = build_command(
+        ConversionSettings(source=Path("book.djvu"), output=Path("out.pdf"), stream_output=True),
+        executable="python",
+    )
+    assert "--stream-to-dest" in command
+
+
 def test_invalid_quality_is_rejected() -> None:
     with pytest.raises(ValueError, match="quality"):
         build_command(

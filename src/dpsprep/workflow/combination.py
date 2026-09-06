@@ -28,6 +28,11 @@ def combine_document(options: DpsPrepOptions, document: djvu.decode.Document) ->
     if options.no_text:
         combine_pdfs_on_fs_without_text(options, outline, len(document.pages))
 
+        # Streaming is a desktop-only path for conversions that do not use
+        # OCR/optimization.  The PDF already lives at its final destination.
+        if options.stream_to_dest:
+            return
+
         ocr_success = False
 
         if options.ocr_options:

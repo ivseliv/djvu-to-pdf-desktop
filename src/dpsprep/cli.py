@@ -70,6 +70,7 @@ def open_djvu_document(source: str) -> object:
 @click.option('-f', '--overwrite', is_flag=True, help='Overwrite destination file.')
 @click.option('-w', '--preserve-working', is_flag=True, help='Preserve the working directory after script termination.')
 @click.option('-d', '--delete-working', is_flag=True, help='Delete any existing files in the working directory prior to writing to it.')
+@click.option('--stream-to-dest', is_flag=True, hidden=True, help='Write the assembled PDF directly to the destination. Used by the desktop app.')
 # Range options
 @click.option('-q', '--quality', 'quality_overrides', type=QualityOverridesClickType(), multiple=True, default=[], help="Determine the quality of images in output. Valid values range between 1 and 100. Used only for JPEG compression, i.e. RGB and Grayscale images. Passed directly to Pillow and to OCRmyPDF's optimizer.")
 @click.option('--dpi', 'dpi_overrides', type=DpiOverridesClickType(), multiple=True, default=[], help='Override the DPI values encoded in the DjVu file for individual pages.')
@@ -98,6 +99,7 @@ def dpsprep(
     optlevel: int | None,
     pool_size: int | None,
     tmp_root: str | None,
+    stream_to_dest: bool,
     # OCR options
     ocr_options: JsonObject | None,
     socr_options: JsonObject | None,
@@ -142,29 +144,42 @@ def dpsprep(
         no_text=no_text or bool(ocr_options or socr_options),
         ocr_options=ocr_options or socr_options,
         optlevel=optlevel,
+        stream_to_dest=stream_to_dest,
         pool_size=pool_size or get_default_pool_size(),
         verbose=verbose,
     )
 
-    start_time = time()
-    document = open_djvu_document(workdir.src)
-    djvu_size = workdir.src.stat().st_size
-
     try:
-        concurrently_process_pages(options, document)
-    except DpsPrepConcurrencyError:
-        # We assume that the actual error has been logged, so we ignore its message.
-        ctx.abort()
+        start_time = time()
+        document = open_djvu_document(workdir.src)
+        djvu_size = workdir.src.stat().st_size
 
-    combine_document(options, document)
+        try:
+            concurrently_process_pages(options, document)
+        except DpsPrepConcurrencyError:
+            # We assume that the actual error has been logged, so we ignore its message.
+            ctx.abort()
 
-    combined_size = workdir.combined_pdf_path.stat().st_size
-    logger.info(f'Produced a combined output file with size {human_readable_size(combined_size)} in {time() - start_time:.2f}s. This is {round(100 * combined_size / djvu_size, 2)}% of the DjVu source file.')
+        combine_document(options, document)
 
-    attempt_to_optimize_result(options, djvu_size, combined_size)
+        combined_path = workdir.dest if stream_to_dest else workdir.combined_pdf_path
+        combined_size = combined_path.stat().st_size
+        logger.info(f'Produced a combined output file with size {human_readable_size(combined_size)} in {time() - start_time:.2f}s. This is {round(100 * combined_size / djvu_size, 2)}% of the DjVu source file.')
+
+        if stream_to_dest:
+            logger.info('PDF was written directly to its destination.')
+        else:
+            attempt_to_optimize_result(options, djvu_size, combined_size)
+    finally:
+        # The desktop app always uses the streaming path.  Its intermediates
+        # are disposable even after a failure (for example, no free space),
+        # so do not leave tens of gigabytes behind.
+        if stream_to_dest and not preserve_working and workdir.working.exists():
+            logger.info(f'Deleting the working directory {workdir.working}.')
+            destroy_workdir(workdir)
 
     if preserve_working:
         logger.info(f'Working directory {workdir.working} will be preserved.')
-    else:
+    elif not stream_to_dest:
         logger.info(f'Deleting the working directory {workdir.working}.')
         destroy_workdir(workdir)

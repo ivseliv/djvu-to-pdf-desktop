@@ -53,6 +53,10 @@ class DpsPrepOptions:
     verbose: bool
     ocr_options: JsonObject | None
     optlevel: int | None
+    # The desktop application uses this mode to avoid keeping a second full
+    # copy of the PDF in its working directory before saving it to the chosen
+    # destination.
+    stream_to_dest: bool = False
 
 
 def parse_ocr_options(ocr_str: str | None, socr_str: str | None) -> JsonObject | None:
