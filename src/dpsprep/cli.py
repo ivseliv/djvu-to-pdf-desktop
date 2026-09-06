@@ -32,6 +32,29 @@ from dpsprep.workflow import (
 logger = logging.getLogger(__name__)
 
 
+def open_djvu_document(source: str) -> object:
+    """Open a DjVu document, retrying one transient DjVuLibre failure.
+
+    DjVuLibre can occasionally report ``JobFailed`` while creating a document
+    for a large bundled DjVu.  A fresh context is cheap and avoids presenting
+    users with a Python traceback for an error that often succeeds on retry.
+    """
+    for attempt in range(2):
+        try:
+            document = djvu.decode.Context().new_document(djvu.decode.FileURI(source))
+            document.decoding_job.wait()
+            return document
+        except djvu.decode.JobFailed as error:
+            if attempt == 1:
+                raise click.ClickException(
+                    "DjVuLibre could not open this document after retrying. "
+                    "The source file was not changed."
+                ) from error
+            logger.warning("DjVuLibre could not open the document; retrying once with a fresh context.")
+
+    raise AssertionError("unreachable")
+
+
 # OCR options
 @click.option('--socr', 'socr_options', type=SocrOptionClickType(), default=None, help='"Streamlined" OCR; `--ocrs eng,grc` expands to `--ocr \'{"language": ["eng", "grc"]}\'`.')
 @click.option('--ocr', 'ocr_options', type=OcrOptionClickType(), default=None, help='Perform OCR via OCRmyPDF rather than trying to convert the text layer. If this parameter has a value, it should be a JSON dictionary of options to be passed to OCRmyPDF.')
@@ -124,10 +147,7 @@ def dpsprep(
     )
 
     start_time = time()
-    document = djvu.decode.Context().new_document(
-        djvu.decode.FileURI(workdir.src),
-    )
-    document.decoding_job.wait()
+    document = open_djvu_document(workdir.src)
     djvu_size = workdir.src.stat().st_size
 
     try:

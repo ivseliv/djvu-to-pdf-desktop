@@ -270,6 +270,12 @@ class ConverterApp(ttk.Frame):
                     else:
                         self.status.set("Конвертация не завершилась.")
                         self._append(f"\nПроцесс завершился с кодом {return_code}.\n")
+                        messagebox.showerror(
+                            "Конвертация не завершилась",
+                            "PDF не был создан. Исходный DjVu не менялся; "
+                            "подробности есть в журнале конвертации.",
+                            parent=self.root,
+                        )
         except queue.Empty:
             pass
         self.after(100, self._drain_events)
