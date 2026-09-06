@@ -3,6 +3,7 @@
 
 import logging
 import multiprocessing
+import os
 from multiprocessing.pool import Pool
 from typing import TYPE_CHECKING
 
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+PROGRESS_PREFIX = '__DPSPREP_PROGRESS__ '
 
 
 class SubprocessPageProcessor:
@@ -62,6 +64,13 @@ class SubprocessPageProcessor:
 
         rich_progress = Progress()
         rich_task = rich_progress.add_task('Processing pages', total=counter.total)
+        report_progress = os.environ.get('DPSPREP_GUI_PROGRESS') == '1'
+
+        def advance_progress() -> None:
+            rich_progress.advance(rich_task)
+            if report_progress:
+                completed = int(rich_progress.tasks[rich_task].completed)
+                print(f'{PROGRESS_PREFIX}{completed}/{counter.total}', flush=True)
 
         with rich_progress:  # ruff: ignore[too-many-nested-blocks]
             if not self.options.no_text:
@@ -94,20 +103,20 @@ class SubprocessPageProcessor:
                                 counter.images[message.page] = True
 
                                 if counter.text[message.page]:
-                                    rich_progress.advance(rich_task)
+                                    advance_progress()
 
                             case TextPageProcessedMessage():
                                 counter.text[message.page] = True
 
                                 if counter.images[message.page]:
-                                    rich_progress.advance(rich_task)
+                                    advance_progress()
 
                             case TextLayerAlreadyProcessedMessage():
                                 for page in range(counter.total):
                                     counter.text[page] = True
 
                                     if counter.images[page]:
-                                        rich_progress.advance(rich_task)
+                                        advance_progress()
 
                 except KeyboardInterrupt:
                     logger.info('Conversion interrupted. Terminating all workers.')

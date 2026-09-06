@@ -38,6 +38,7 @@ MODE_HINTS = {
     "grayscale": "Для серых сканов без цветных иллюстраций.",
     "rgb": "Для книг с цветными иллюстрациями и фотографиями.",
 }
+PROGRESS_PREFIX = "__DPSPREP_PROGRESS__ "
 
 
 class ConverterApp(ttk.Frame):
@@ -67,6 +68,8 @@ class ConverterApp(ttk.Frame):
         self.show_advanced = tk.BooleanVar(value=False)
         self.show_log = tk.BooleanVar(value=False)
         self.status = tk.StringVar(value="Выберите DjVu-файл, чтобы начать.")
+        self.progress_value = tk.DoubleVar(value=0)
+        self.progress_text = tk.StringVar(value="")
         self.mode_hint = tk.StringVar(value=MODE_HINTS["infer"])
         self.events: queue.Queue[tuple[str, str | int]] = queue.Queue()
         self.process: subprocess.Popen[str] | None = None
@@ -188,6 +191,21 @@ class ConverterApp(ttk.Frame):
         self.cancel_button.pack(side="left", padx=(9, 0))
         ttk.Label(actions, textvariable=self.status, style="Status.TLabel").pack(side="right")
 
+        self.progress_area = ttk.Frame(self, style="App.TFrame")
+        self.progress_area.pack(fill="x", pady=(12, 0))
+        self.progress_area.columnconfigure(0, weight=1)
+        self.progress_bar = ttk.Progressbar(
+            self.progress_area,
+            variable=self.progress_value,
+            maximum=100,
+            mode="determinate",
+        )
+        self.progress_bar.grid(row=0, column=0, sticky="ew")
+        ttk.Label(self.progress_area, textvariable=self.progress_text, style="Status.TLabel").grid(
+            row=1, column=0, sticky="w", pady=(5, 0)
+        )
+        self.progress_area.pack_forget()
+
         self.log_toggle = ttk.Checkbutton(self, text="Показать журнал конвертации", variable=self.show_log, command=self._toggle_log)
         self.log_toggle.pack(anchor="w", pady=(18, 7))
         self.log_card = ttk.Frame(self, style="Card.TFrame", padding=10)
@@ -257,6 +275,9 @@ class ConverterApp(ttk.Frame):
             return
         self._append("$ " + subprocess.list2cmdline(command) + "\n")
         self.status.set("Идёт конвертация…")
+        self.progress_value.set(0)
+        self.progress_text.set("Подготовка…")
+        self.progress_area.pack(fill="x", pady=(12, 0), before=self.log_toggle)
         self.convert_button.configure(state="disabled")
         self.cancel_button.configure(state="normal")
         threading.Thread(target=self._run, args=(settings,), daemon=True).start()
@@ -287,10 +308,18 @@ class ConverterApp(ttk.Frame):
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                env={**os.environ, "DPSPREP_GUI_PROGRESS": "1"},
             )
             assert self.process.stdout is not None
             for line in self.process.stdout:
-                self.events.put(("log", line))
+                if line.startswith(PROGRESS_PREFIX):
+                    try:
+                        completed, total = line.removeprefix(PROGRESS_PREFIX).strip().split("/", maxsplit=1)
+                        self.events.put(("progress", (int(completed), int(total))))
+                    except ValueError:
+                        self.events.put(("log", line))
+                else:
+                    self.events.put(("log", line))
             return_code = self.process.wait()
             if return_code == 0 and staging_directory is not None:
                 self.events.put(("status", "Сохраняю готовый PDF…"))
@@ -327,6 +356,12 @@ class ConverterApp(ttk.Frame):
                 kind, value = self.events.get_nowait()
                 if kind == "log":
                     self._append(str(value))
+                elif kind == "status":
+                    self.status.set(str(value))
+                elif kind == "progress":
+                    completed, total = value
+                    self.progress_value.set(100 * completed / total if total else 0)
+                    self.progress_text.set(f"Страницы: {completed:,} из {total:,} · {100 * completed / total:.1f}%")
                 else:
                     return_code = int(value)
                     self.process = None
