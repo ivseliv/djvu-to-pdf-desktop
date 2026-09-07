@@ -43,6 +43,21 @@ MODE_HINTS = {
     'grayscale': 'Для серых сканов без цветных иллюстраций.',
     'rgb': 'Для книг с цветными иллюстрациями и фотографиями.',
 }
+PROFILE_LABELS = {
+    'Сбалансированный — 300 dpi, цвет': (300, 'infer', 40),
+    'Компактный — 250 dpi, оттенки серого': (250, 'grayscale', 35),
+    'Чёрно-белый — 300 dpi, минимальный размер': (300, 'bitonal', 50),
+    'Оригинальное разрешение — большой файл': (None, 'infer', 50),
+}
+RESOLUTION_LABELS = {
+    'Оригинальное': None,
+    '600 dpi': 600,
+    '400 dpi': 400,
+    '300 dpi': 300,
+    '250 dpi': 250,
+    '200 dpi': 200,
+    '150 dpi': 150,
+}
 PROGRESS_PREFIX = '__DPSPREP_PROGRESS__ '
 COMBINE_PROGRESS_PREFIX = '__DPSPREP_COMBINE_PROGRESS__ '
 QPDF_PROGRESS_PREFIX = '__DPSPREP_QPDF_PROGRESS__ '
@@ -72,7 +87,9 @@ class ConverterApp(ttk.Frame):
         self.keep_text = tk.BooleanVar(value=True)
         self.overwrite = tk.BooleanVar(value=True)
         self.mode_label = tk.StringVar(value='Автоматически — рекомендовано')
-        self.quality = tk.IntVar(value=50)
+        self.profile_label = tk.StringVar(value='Сбалансированный — 300 dpi, цвет')
+        self.resolution_label = tk.StringVar(value='300 dpi')
+        self.quality = tk.IntVar(value=40)
         self.pool_size = tk.StringVar(value='')
         self.show_advanced = tk.BooleanVar(value=False)
         self.show_log = tk.BooleanVar(value=False)
@@ -163,6 +180,15 @@ class ConverterApp(ttk.Frame):
 
         primary_options = ttk.Frame(self, style='Card.TFrame', padding=(18, 14))
         primary_options.pack(fill='x', pady=(14, 0))
+        ttk.Label(primary_options, text='Профиль размера и качества', style='Field.TLabel').pack(anchor='w')
+        profile_picker = ttk.Combobox(
+            primary_options,
+            textvariable=self.profile_label,
+            values=tuple(PROFILE_LABELS),
+            state='readonly',
+        )
+        profile_picker.pack(fill='x', pady=(6, 12))
+        profile_picker.bind('<<ComboboxSelected>>', self._apply_profile)
         ttk.Checkbutton(primary_options, text='Сохранить текстовый слой для поиска и копирования', variable=self.keep_text).pack(anchor='w')
         ttk.Checkbutton(primary_options, text='Заменять PDF, если файл с таким именем уже есть', variable=self.overwrite).pack(anchor='w', pady=(8, 0))
 
@@ -181,17 +207,26 @@ class ConverterApp(ttk.Frame):
         mode_picker.bind('<<ComboboxSelected>>', self._update_mode_hint)
         ttk.Label(mode_area, textvariable=self.mode_hint, style='Hint.TLabel', wraplength=470).grid(row=1, column=0, sticky='w', pady=(5, 0))
 
-        ttk.Label(self.advanced_card, text='Качество JPEG', style='Field.TLabel').grid(row=2, column=0, sticky='nw', pady=(18, 0))
+        ttk.Label(self.advanced_card, text='Разрешение', style='Field.TLabel').grid(row=2, column=0, sticky='nw', pady=(18, 0))
+        resolution_picker = ttk.Combobox(
+            self.advanced_card,
+            textvariable=self.resolution_label,
+            values=tuple(RESOLUTION_LABELS),
+            state='readonly',
+        )
+        resolution_picker.grid(row=2, column=1, sticky='ew', pady=(15, 0))
+
+        ttk.Label(self.advanced_card, text='Качество JPEG', style='Field.TLabel').grid(row=3, column=0, sticky='nw', pady=(18, 0))
         quality_area = ttk.Frame(self.advanced_card, style='Card.TFrame')
-        quality_area.grid(row=2, column=1, sticky='ew', pady=(15, 0))
+        quality_area.grid(row=3, column=1, sticky='ew', pady=(15, 0))
         quality_area.columnconfigure(0, weight=1)
         ttk.Scale(quality_area, from_=1, to=100, variable=self.quality).grid(row=0, column=0, sticky='ew')
         ttk.Label(quality_area, textvariable=self.quality, style='Field.TLabel', width=3).grid(row=0, column=1, padx=(10, 0))
         ttk.Label(quality_area, text='Влияет только на цветные и серые страницы.', style='Hint.TLabel').grid(row=1, column=0, columnspan=2, sticky='w', pady=(5, 0))
 
-        ttk.Label(self.advanced_card, text='Параллельность', style='Field.TLabel').grid(row=3, column=0, sticky='nw', pady=(18, 0))
+        ttk.Label(self.advanced_card, text='Параллельность', style='Field.TLabel').grid(row=4, column=0, sticky='nw', pady=(18, 0))
         workers_area = ttk.Frame(self.advanced_card, style='Card.TFrame')
-        workers_area.grid(row=3, column=1, sticky='w', pady=(15, 0))
+        workers_area.grid(row=4, column=1, sticky='w', pady=(15, 0))
         ttk.Spinbox(workers_area, from_=1, to=64, textvariable=self.pool_size, width=6).pack(side='left')
         ttk.Label(workers_area, text='Пустое поле — автоматический выбор', style='Hint.TLabel').pack(side='left', padx=(10, 0))
 
@@ -200,7 +235,7 @@ class ConverterApp(ttk.Frame):
             text='Очистить временные файлы…',
             style='Secondary.TButton',
             command=self._clean_jobs,
-        ).grid(row=4, column=1, sticky='w', pady=(18, 0))
+        ).grid(row=5, column=1, sticky='w', pady=(18, 0))
 
         actions = ttk.Frame(self, style='App.TFrame')
         actions.pack(fill='x', pady=(18, 0))
@@ -259,6 +294,13 @@ class ConverterApp(ttk.Frame):
     def _update_mode_hint(self, _event: object | None = None) -> None:
         self.mode_hint.set(MODE_HINTS[MODE_LABELS[self.mode_label.get()]])
 
+    def _apply_profile(self, _event: object | None = None) -> None:
+        max_dpi, mode, quality = PROFILE_LABELS[self.profile_label.get()]
+        self.resolution_label.set('Оригинальное' if max_dpi is None else f'{max_dpi} dpi')
+        self.mode_label.set(next(label for label, value in MODE_LABELS.items() if value == mode))
+        self.quality.set(quality)
+        self.mode_hint.set(MODE_HINTS[mode])
+
     def _choose_source(self) -> None:
         chosen = filedialog.askopenfilename(title='Выберите DjVu-файл', filetypes=(('DjVu', '*.djvu *.djv'), ('Все файлы', '*')))
         if chosen:
@@ -280,7 +322,7 @@ class ConverterApp(ttk.Frame):
             pool_size = int(pool_text) if pool_text else None
         except ValueError as error:
             raise ValueError('Число процессов должно быть целым числом.') from error
-        return ConversionSettings(source=Path(self.source.get()), output=Path(self.output.get()), preserve_text=self.keep_text.get(), image_mode=MODE_LABELS[self.mode_label.get()], quality=self.quality.get(), pool_size=pool_size, overwrite=self.overwrite.get(), stream_output=True)
+        return ConversionSettings(source=Path(self.source.get()), output=Path(self.output.get()), preserve_text=self.keep_text.get(), image_mode=MODE_LABELS[self.mode_label.get()], quality=self.quality.get(), max_dpi=RESOLUTION_LABELS[self.resolution_label.get()], pool_size=pool_size, overwrite=self.overwrite.get(), stream_output=True)
 
     def _validated_start_settings(self) -> tuple[ConversionSettings, list[str]]:
         settings = self._settings()
@@ -511,6 +553,8 @@ class ConverterApp(ttk.Frame):
                     self.mode_label.set(label)
                     break
             self.quality.set(int(str(manifest.get('quality', 50))))
+            max_dpi = manifest.get('max_dpi')
+            self.resolution_label.set('Оригинальное' if max_dpi is None else f'{int(str(max_dpi))} dpi')
             pool_size = manifest.get('pool_size')
             self.pool_size.set('' if pool_size is None else str(pool_size))
             self.status.set('Незавершённое задание готово к продолжению.')

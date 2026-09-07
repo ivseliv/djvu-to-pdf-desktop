@@ -29,6 +29,7 @@ class ConversionSettings:
     preserve_bookmarks: bool = True
     image_mode: str = 'infer'
     quality: int = 50
+    max_dpi: int | None = None
     pool_size: int | None = None
     overwrite: bool = True
     stream_output: bool = False
@@ -44,6 +45,8 @@ class ConversionSettings:
             raise ValueError(f'Unknown image mode: {self.image_mode}')
         if not 1 <= self.quality <= 100:
             raise ValueError('Image quality must be between 1 and 100.')
+        if self.max_dpi is not None and not 72 <= self.max_dpi <= 1200:
+            raise ValueError('Maximum image resolution must be between 72 and 1200 DPI.')
         if self.pool_size is not None and self.pool_size < 1:
             raise ValueError('The number of worker processes must be at least 1.')
 
@@ -86,6 +89,8 @@ def build_command(
         command.append('--preserve-working')
     if settings.pool_size is not None:
         command.extend(('--pool-size', str(settings.pool_size)))
+    if settings.max_dpi is not None:
+        command.extend(('--max-dpi', str(settings.max_dpi)))
 
     command.extend(('--mode', settings.image_mode, '--quality', str(settings.quality)))
 

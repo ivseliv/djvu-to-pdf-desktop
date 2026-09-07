@@ -37,9 +37,19 @@ class ProcessedPageBackground(NamedTuple):
     mode: ImageMode
 
 
-def process_djvu_page(page: djvu.decode.Page, mode: ImageMode, i: int) -> ProcessedPageBackground:
+def process_djvu_page(
+    page: djvu.decode.Page,
+    mode: ImageMode,
+    i: int,
+    max_dpi: int | None = None,
+) -> ProcessedPageBackground:
     page_job = page.decode(wait=True)
-    width, height = page_job.size
+    source_width, source_height = page_job.size
+    source_dpi = page_job.dpi
+    resolution = min(source_dpi, max_dpi) if max_dpi is not None else source_dpi
+    scale = resolution / source_dpi
+    width = max(1, round(source_width * scale))
+    height = max(1, round(source_height * scale))
     buffer = bytearray(3 * width * height)  # RGB at most
 
     rect = (0, 0, width, height)
@@ -66,15 +76,15 @@ def process_djvu_page(page: djvu.decode.Page, mode: ImageMode, i: int) -> Proces
         logger.warning(f'libdjvu claims that data for page {i + 1} is not available. Producing a blank page.')
         image = Image.new(
             pil_modes[ImageMode.BITONAL],
-            page_job.size,
+            (width, height),
             1,
         )
 
-        return ProcessedPageBackground(image, page_job.dpi, ImageMode.BITONAL)
+        return ProcessedPageBackground(image, resolution, ImageMode.BITONAL)
 
     image = Image.frombuffer(
         pil_modes[mode],
-        page_job.size,
+        (width, height),
         buffer,
         'raw',
     )
@@ -83,7 +93,7 @@ def process_djvu_page(page: djvu.decode.Page, mode: ImageMode, i: int) -> Proces
         # I have experimentally determined that we need to invert the black-and-white images. -- Ianis, 2023-05-13
         # See also https://github.com/kcroker/dpsprep/issues/16
         ImageOps.invert(image) if mode == ImageMode.BITONAL else image,
-        page_job.dpi,
+        resolution,
         mode,
     )
 

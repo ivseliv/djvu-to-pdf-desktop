@@ -45,6 +45,17 @@ def test_build_command_can_request_the_space_efficient_desktop_pipeline() -> Non
     assert '--stream-to-dest' in command
 
 
+def test_build_command_can_limit_render_resolution() -> None:
+    command = build_command(
+        ConversionSettings(
+            source=Path('book.djvu'), output=Path('out.pdf'), max_dpi=300,
+        ),
+        executable='python',
+    )
+    assert '--max-dpi' in command
+    assert command[command.index('--max-dpi') + 1] == '300'
+
+
 def test_invalid_quality_is_rejected() -> None:
     with pytest.raises(ValueError, match='quality'):
         build_command(

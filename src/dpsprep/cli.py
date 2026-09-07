@@ -92,6 +92,7 @@ def process_pages_or_resume(
 @click.option('-w', '--preserve-working', is_flag=True, help='Preserve the working directory after script termination.')
 @click.option('-d', '--delete-working', is_flag=True, help='Delete any existing files in the working directory prior to writing to it.')
 @click.option('--stream-to-dest', is_flag=True, hidden=True, help='Write the assembled PDF directly to the destination. Used by the desktop app.')
+@click.option('--max-dpi', type=click.IntRange(min=72, max=1200), default=None, help='Downsample page images above this resolution while preserving their physical page size.')
 # Range options
 @click.option('-q', '--quality', 'quality_overrides', type=QualityOverridesClickType(), multiple=True, default=[], help="Determine the quality of images in output. Valid values range between 1 and 100. Used only for JPEG compression, i.e. RGB and Grayscale images. Passed directly to Pillow and to OCRmyPDF's optimizer.")
 @click.option('--dpi', 'dpi_overrides', type=DpiOverridesClickType(), multiple=True, default=[], help='Override the DPI values encoded in the DjVu file for individual pages.')
@@ -121,6 +122,7 @@ def dpsprep(
     pool_size: int | None,
     tmp_root: str | None,
     stream_to_dest: bool,
+    max_dpi: int | None,
     # OCR options
     ocr_options: JsonObject | None,
     socr_options: JsonObject | None,
@@ -162,6 +164,7 @@ def dpsprep(
         mode_overrides=functools.reduce(operator.or_, mode_overrides),
         dpi_overrides=functools.reduce(operator.or_, dpi_overrides, RangeOptionGroup([])),
         quality_overrides=functools.reduce(operator.or_, quality_overrides, RangeOptionGroup([])),
+        max_dpi=max_dpi,
         no_text=no_text or bool(ocr_options or socr_options),
         ocr_options=ocr_options or socr_options,
         optlevel=optlevel,

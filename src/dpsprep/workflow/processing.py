@@ -27,7 +27,7 @@ def process_page_bg(options: DpsPrepOptions, document: djvu.decode.Document, i: 
 
     start_time = time()
     mode = options.mode_overrides.get_value_for_zero_based_page(i) or DEFAULT_IMAGE_MODE
-    page_bg = process_djvu_page(document.pages[i], mode, i)
+    page_bg = process_djvu_page(document.pages[i], mode, i, max_dpi=options.max_dpi)
     failsafe_save_djvu_page(
         page_bg,
         options.workdir.get_page_pdf_path(i),

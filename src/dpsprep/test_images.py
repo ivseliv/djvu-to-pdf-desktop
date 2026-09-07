@@ -32,3 +32,23 @@ def test_process_djvu_page_bitonal() -> None:
     assert result.resolution == page_decode_job.dpi
 
     assert calculate_image_diff_score(fixture, result.pil_image) < 0.05
+
+
+def test_process_djvu_page_downsamples_without_changing_physical_size() -> None:
+    document = djvu.decode.Context().new_document(
+        djvu.decode.FileURI('fixtures/lipsum_words.djvu'),
+    )
+    document.decoding_job.wait()
+    page_job = document.pages[0].decode(wait=True)
+    target_dpi = max(72, page_job.dpi // 2)
+
+    result = process_djvu_page(
+        document.pages[0],
+        mode=ImageMode.INFER,
+        i=0,
+        max_dpi=target_dpi,
+    )
+
+    assert result.resolution == target_dpi
+    assert result.pil_image.width == round(page_job.size[0] * target_dpi / page_job.dpi)
+    assert result.pil_image.height == round(page_job.size[1] * target_dpi / page_job.dpi)

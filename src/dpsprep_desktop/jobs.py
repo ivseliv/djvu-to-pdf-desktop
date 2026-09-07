@@ -35,6 +35,7 @@ def create_job(settings: ConversionSettings, version: str) -> Path:
         'preserve_text': bool(settings.preserve_text),
         'image_mode': str(settings.image_mode),
         'quality': int(settings.quality),
+        'max_dpi': settings.max_dpi,
         'pool_size': settings.pool_size,
     })
     return job

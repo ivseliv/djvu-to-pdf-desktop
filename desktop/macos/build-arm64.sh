@@ -61,7 +61,7 @@ done
 smoke_dir=$(mktemp -d /private/tmp/dpsprep-build-smoke.XXXXXX)
 trap 'rm -rf "$smoke_dir"' EXIT
 PATH=/usr/bin:/bin "$app/Contents/MacOS/DjVu to PDF" \
-    --run-dpsprep --overwrite --stream-to-dest --pool-size 2 \
+    --run-dpsprep --overwrite --stream-to-dest --pool-size 2 --max-dpi 300 \
     --tmp "$smoke_dir" \
     "$project_root/fixtures/lipsum_words.djvu" \
     "$smoke_dir/smoke.pdf"

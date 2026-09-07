@@ -47,6 +47,10 @@ class DpsPrepOptions:
     dpi_overrides: RangeOptionGroup[int]
     quality_overrides: RangeOptionGroup[int]
 
+    # Downsample page images above this resolution while preserving their
+    # physical page size. None keeps the source pixel dimensions.
+    max_dpi: int | None
+
     # Other options
     no_text: bool
     pool_size: int

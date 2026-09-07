@@ -152,7 +152,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $SmokeOutput = Join-Path $BuildRoot "autonomous-smoke.pdf"
-& $App --run-dpsprep --overwrite --stream-to-dest --pool-size 2 `
+& $App --run-dpsprep --overwrite --stream-to-dest --pool-size 2 --max-dpi 300 `
     (Join-Path $ProjectRoot "fixtures\\lipsum_words.djvu") $SmokeOutput
 if ($LASTEXITCODE -ne 0) {
     throw "The packaged conversion smoke test failed with exit code $LASTEXITCODE."

@@ -31,6 +31,11 @@ The source DjVu's existing text layer and bookmarks are retained by default.
 The desktop interface does not perform OCR or run PDF optimization: it only
 transfers the searchable source layer into the generated PDF.
 
+The default balanced profile renders page images at no more than 300 DPI and
+uses JPEG quality 40. Compact grayscale, compact bitonal, and full-resolution
+profiles are also available. Downsampling changes only page imagery; text and
+bookmark geometry retains the original physical page dimensions.
+
 For large files, the desktop worker keeps at most two 64-page windows in flight,
 assembles completed pages into blocks, and removes their one-page PDFs at once.
 Standalone QPDF then joins the blocks with bounded memory.  The GUI owns a
