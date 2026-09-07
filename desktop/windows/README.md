@@ -16,6 +16,11 @@ separately built and tested wheel rather than hoping `pip` can build one during
 packaging.  The wheel and DLL must use the same architecture, Python ABI and
 DjVuLibre version.
 
+The standalone QPDF runtime is also required. Extract its Windows x64 package
+under `third_party\windows-x64\qpdf` so that `bin\qpdf.exe` and all companion
+DLLs are present. The build copies this directory into the application; QA
+must run with QPDF absent from the machine-wide `PATH`.
+
 Before building, place the verified 64-bit DjVuLibre runtime here (the folder
 is intentionally ignored by Git):
 
@@ -36,11 +41,10 @@ In PowerShell from the repository root:
 .\desktop\windows\build-x64.ps1 -BindingWheel C:\release-input\djvulibre_python-0.9.3-cp311-cp311-win_amd64.whl -Clean
 ```
 
-The output is `dist\windows-x64\DjVu to PDF\DjVu to PDF.exe`.  The build script
-performs an import test and starts the packaged command-line worker with
-`--help`; release QA must additionally convert DjVu fixtures, extract the PDF
-text with a PDF reader, and test on a clean Windows machine before signing the
-installer.
+The output is `dist\windows-x64\DjVu to PDF\DjVu to PDF.exe`. The build script
+checks the native bindings and bundled QPDF, starts the packaged worker, then
+converts and validates a text-bearing DjVu fixture. Release QA must still test
+the folder on a clean Windows machine before signing an installer.
 
 The script packages the DjVuLibre DLL and GPL notices with the app.  Audit the
 exact native runtime and include every required third-party notice before a

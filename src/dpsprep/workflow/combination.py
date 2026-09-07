@@ -13,7 +13,9 @@ from dpsprep.pdf import combine_pdfs_on_fs_with_text, combine_pdfs_on_fs_without
 logger = logging.getLogger(__name__)
 
 
-def combine_document(options: DpsPrepOptions, document: djvu.decode.Document) -> None:
+def prepare_document_combination(
+    document: djvu.decode.Document,
+) -> tuple[pdfrw.IndirectPdfDict, int]:
     outline = pdfrw.IndirectPdfDict()
 
     if len(document.outline.sexpr) > 0:
@@ -23,10 +25,19 @@ def combine_document(options: DpsPrepOptions, document: djvu.decode.Document) ->
     else:
         logger.info('No metadata to process.')
 
+    return outline, len(document.pages)
+
+
+def combine_prepared_document(
+    options: DpsPrepOptions,
+    outline: pdfrw.IndirectPdfDict,
+    page_count: int,
+) -> None:
+
     logger.info('Combining everything.')
 
     if options.no_text:
-        combine_pdfs_on_fs_without_text(options, outline, len(document.pages))
+        combine_pdfs_on_fs_without_text(options, outline, page_count)
 
         # Streaming is a desktop-only path for conversions that do not use
         # OCR/optimization.  The PDF already lives at its final destination.
@@ -48,3 +59,9 @@ def combine_document(options: DpsPrepOptions, document: djvu.decode.Document) ->
             )
     else:
         combine_pdfs_on_fs_with_text(options, outline)
+
+
+def combine_document(options: DpsPrepOptions, document: djvu.decode.Document) -> None:
+    """Compatibility wrapper for callers that do not need early DjVu release."""
+    outline, page_count = prepare_document_combination(document)
+    combine_prepared_document(options, outline, page_count)

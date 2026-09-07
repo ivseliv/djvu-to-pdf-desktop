@@ -1,6 +1,7 @@
 import logging
 import signal
-from typing import TYPE_CHECKING
+import time
+from typing import TYPE_CHECKING, Protocol
 
 import djvu.decode
 
@@ -12,6 +13,7 @@ from .message import (
     ImagePageProcessedMessage,
     LogRecordWorkerMessage,
     TextLayerAlreadyProcessedMessage,
+    TextLayerFinishedMessage,
     TextPageProcessedMessage,
     WorkerMessage,
 )
@@ -22,6 +24,15 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+class SharedPageLimit(Protocol):
+    value: int
+
+
+def first_worker_page(worker_id: int, pool_size: int, resume_page: int) -> int:
+    """Return the first non-completed page belonging to one striped worker."""
+    return resume_page + (worker_id - resume_page) % pool_size
 
 
 class SubprocessWorkerLoggerHandler(logging.Handler):
@@ -82,8 +93,14 @@ class SubprocessWorker:
 
         tracker = SubprocessTextExtractionTracker(self.child_conn)
         process_text(self.options, document, tracker)
+        self.child_conn.send(TextLayerFinishedMessage())
 
-    def process_page_bg(self, worker_id: int) -> None:
+    def process_page_bg(
+        self,
+        worker_id: int,
+        page_limit: SharedPageLimit | None = None,
+        resume_page: int = 0,
+    ) -> None:
         self.setup_child_process()
 
         # The document must be read anew because the underlying structures are not properly copied.
@@ -92,7 +109,10 @@ class SubprocessWorker:
         )
         document.decoding_job.wait()
 
-        for i in range(worker_id, len(document.pages), self.options.pool_size):
+        first_page = first_worker_page(worker_id, self.options.pool_size, resume_page)
+        for i in range(first_page, len(document.pages), self.options.pool_size):
+            while page_limit is not None and i >= page_limit.value:
+                time.sleep(0.05)
             process_page_bg(self.options, document, i)
             self.child_conn.send(
                 ImagePageProcessedMessage(i),

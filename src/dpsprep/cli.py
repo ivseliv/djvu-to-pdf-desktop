@@ -1,6 +1,8 @@
 import functools
+import gc
 import logging
 import operator
+import pathlib
 from time import time
 
 import click
@@ -20,19 +22,21 @@ from dpsprep.options import (
     SocrOptionClickType,
     get_default_pool_size,
 )
+from dpsprep.qpdf import find_qpdf
 from dpsprep.range import RangeOptionGroup
 from dpsprep.workflow import (
     attempt_to_optimize_result,
-    combine_document,
+    combine_prepared_document,
     destroy_workdir,
     initialize_workdir,
+    prepare_document_combination,
 )
 
 
 logger = logging.getLogger(__name__)
 
 
-def open_djvu_document(source: str) -> object:
+def open_djvu_document(source: str | pathlib.Path) -> object:
     """Open a DjVu document, retrying one transient DjVuLibre failure.
 
     DjVuLibre can occasionally report ``JobFailed`` while creating a document
@@ -43,16 +47,33 @@ def open_djvu_document(source: str) -> object:
         try:
             document = djvu.decode.Context().new_document(djvu.decode.FileURI(source))
             document.decoding_job.wait()
-            return document
         except djvu.decode.JobFailed as error:
             if attempt == 1:
                 raise click.ClickException(
-                    "DjVuLibre could not open this document after retrying. "
-                    "The source file was not changed."
+                    'DjVuLibre could not open this document after retrying. '
+                    'The source file was not changed.',
                 ) from error
-            logger.warning("DjVuLibre could not open the document; retrying once with a fresh context.")
+            logger.warning('DjVuLibre could not open the document; retrying once with a fresh context.')
+        else:
+            return document
 
-    raise AssertionError("unreachable")
+    raise AssertionError('unreachable')
+
+
+def process_pages_or_resume(
+    ctx: click.Context,
+    options: DpsPrepOptions,
+    document: object,
+    stream_to_dest: bool,
+) -> None:
+    if stream_to_dest and options.workdir.merged_pdf_path.exists():
+        logger.info('A fully assembled PDF was found; skipping page workers and resuming validation.')
+        return
+    try:
+        concurrently_process_pages(options, document)
+    except DpsPrepConcurrencyError:
+        # We assume that the actual error has been logged, so we ignore its message.
+        ctx.abort()
 
 
 # OCR options
@@ -149,18 +170,24 @@ def dpsprep(
         verbose=verbose,
     )
 
+    if stream_to_dest:
+        qpdf_path = find_qpdf()
+        logger.info(f'Using QPDF at {qpdf_path}.')
+
     try:
         start_time = time()
         document = open_djvu_document(workdir.src)
         djvu_size = workdir.src.stat().st_size
 
-        try:
-            concurrently_process_pages(options, document)
-        except DpsPrepConcurrencyError:
-            # We assume that the actual error has been logged, so we ignore its message.
-            ctx.abort()
+        process_pages_or_resume(ctx, options, document, stream_to_dest)
 
-        combine_document(options, document)
+        outline, page_count = prepare_document_combination(document)
+        # Each DjVu document holds decoded page state and native caches. Free
+        # those before the final disk-space check and QPDF merge; on macOS
+        # this also releases several GiB of transient swap/purgeable storage.
+        del document
+        gc.collect()
+        combine_prepared_document(options, outline, page_count)
 
         combined_path = workdir.dest if stream_to_dest else workdir.combined_pdf_path
         combined_size = combined_path.stat().st_size

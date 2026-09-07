@@ -27,10 +27,16 @@ class TextLayerAlreadyProcessedMessage:
     pass
 
 
+@dataclass(frozen=True)
+class TextLayerFinishedMessage:
+    pass
+
+
 WorkerMessage = (
     ExceptionWorkerMessage |
     LogRecordWorkerMessage |
     ImagePageProcessedMessage |
     TextPageProcessedMessage |
-    TextLayerAlreadyProcessedMessage
+    TextLayerAlreadyProcessedMessage |
+    TextLayerFinishedMessage
 )

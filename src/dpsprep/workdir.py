@@ -30,3 +30,11 @@ class WorkingDirectory:
     @property
     def optimized_pdf_path(self) -> pathlib.Path:
         return self.working / 'optimized.pdf'
+
+    @property
+    def merged_pdf_path(self) -> pathlib.Path:
+        return self.working / 'merged.pdf'
+
+    @property
+    def qpdf_argument_path(self) -> pathlib.Path:
+        return self.working / 'qpdf-arguments.txt'

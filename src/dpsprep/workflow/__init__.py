@@ -1,4 +1,4 @@
-from .combination import combine_document
+from .combination import combine_document, combine_prepared_document, prepare_document_combination
 from .optimization import attempt_to_optimize_result
 from .processing import process_page_bg, process_text
 from .workdir import destroy_workdir, initialize_workdir

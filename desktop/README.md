@@ -31,23 +31,30 @@ The source DjVu's existing text layer and bookmarks are retained by default.
 The desktop interface does not perform OCR or run PDF optimization: it only
 transfers the searchable source layer into the generated PDF.
 
-For large files, the desktop worker assembles page PDFs in batches of 64 and
-writes the result directly to a temporary file beside the selected destination.
-This avoids keeping three full PDF copies at once. The GUI removes its working
-directory after either a successful conversion or a failure, including an
-out-of-space error.
+For large files, the desktop worker keeps at most two 64-page windows in flight,
+assembles completed pages into blocks, and removes their one-page PDFs at once.
+Standalone QPDF then joins the blocks with bounded memory.  The GUI owns a
+persistent job directory in `/var/tmp/djvu-to-pdf-jobs`, can resume an
+interrupted conversion, and offers explicit cleanup.  On the same disk it
+publishes the verified result with an atomic rename, so saving does not require
+a third full copy of a very large PDF.
+
+The progress bar covers source staging, text-layer transfer, page rendering,
+block assembly, QPDF merging, validation, and final publication. Validation
+checks the PDF structure, page count, and representative text-layer content
+before the result is reported as complete.
 
 ## Release packaging
 
 Build each platform on that platform. A frozen app must ship a 64-bit
 DjVuLibre runtime as well as the Python bindings; test it on a clean machine.
 
-```console
-uv run --with 'pyinstaller>=6.12' pyinstaller --noconfirm --windowed --name "DjVu to PDF" \
-  --add-data 'LICENSES:LICENSES' \
-  --collect-all dpsprep --collect-all dpsprep_desktop --collect-all djvu --collect-all pikepdf \
-  desktop/launcher.py
-```
+Install QPDF with Homebrew on the build machine, then run
+`desktop/macos/build-arm64.sh`. The script embeds the QPDF executable, its
+dynamic library, license, and notices. It sets the desktop version in the app
+metadata, applies an ad-hoc signature, verifies both binaries are arm64, and
+converts a text-bearing fixture with a restricted `PATH` to prove that the app
+does not use Homebrew at runtime.
 
 Produce separate macOS `arm64`, macOS `x86_64`, and Windows `x86_64` builds.
 On macOS, sign and notarize the `.app` before publishing; on Windows, code-sign

@@ -1,10 +1,9 @@
 name: Publish
 
+# This fork publishes desktop application releases on GitHub.  Keep the
+# inherited upstream PyPI workflow manual so a desktop release tag can never
+# overwrite or impersonate the original dpsprep package.
 on:
-  push:
-    tags:
-      - 'v*'
-
   workflow_dispatch:
 
 jobs:

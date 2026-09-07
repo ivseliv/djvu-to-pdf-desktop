@@ -92,10 +92,13 @@ def failsafe_save_djvu_page(page_bg: ProcessedPageBackground, target: pathlib.Pa
     quality = options.quality_overrides.get_value_for_zero_based_page(i)
     dpi = options.dpi_overrides.get_value_for_zero_based_page(i) or page_bg.resolution
 
-    if quality is not None:
-        if page_bg.pil_image.mode in pil_modes[ImageMode.BITONAL] and PIL.features.check_codec('libtiff'):
-            logger.warning('Pillow uses TIFF for encoding bitonal PDF images. The encoder does not support a "quality" setting. If the conversion fails, please try again without specifying quality.')
+    # JPEG quality is intentionally irrelevant for one-bit pages. Passing it
+    # to Pillow's TIFF-backed PDF encoder raises ValueError and used to emit
+    # two warnings for every bitonal page in large books.
+    if page_bg.pil_image.mode == pil_modes[ImageMode.BITONAL]:
+        quality = None
 
+    if quality is not None:
         try:
             page_bg.pil_image.save(
                 target,

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Desktop 0.1.8 - 2026-09-07
+
+* Replace the memory-heavy final Python merge with standalone QPDF.
+* Assemble completed pages into 64-page blocks and bound the in-flight queue.
+* Preserve existing DjVu text and nested bookmarks, without OCR.
+* Add persistent desktop jobs, restart recovery, cancellation, and explicit cleanup.
+* Show staged progress for text, pages, blocks, QPDF, validation, and saving.
+* Validate structure, page count, and sampled text before publishing a result.
+* Bundle QPDF and its notices in the native Apple Silicon application.
+* Add a reproducible macOS build with an offline packaged-conversion smoke test.
+* Extend the Windows x64 build contract to include and test standalone QPDF.
+
 ## 2.8.3 - 2026-08-12
 
 * Fix incompatibility with OCRmyPDF >= 0.17.10.
