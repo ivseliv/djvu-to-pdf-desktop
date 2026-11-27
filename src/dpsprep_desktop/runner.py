@@ -95,7 +95,7 @@ class ConversionRunner:
                 text=True,
                 encoding='utf-8',
                 errors='replace',
-                env={**os.environ, 'DPSPREP_GUI_PROGRESS': '1', 'PYTHONIOENCODING': 'utf-8'},
+                env={**os.environ, 'DPSPREP_GUI_PROGRESS': '1', 'DPSPREP_DESKTOP_JOB': str(job.resolve()), 'PYTHONIOENCODING': 'utf-8'},
                 start_new_session=(os.name == 'posix'),
                 pass_fds=(lock_fd,) if os.name == 'posix' else (),
                 creationflags=creation_flags,

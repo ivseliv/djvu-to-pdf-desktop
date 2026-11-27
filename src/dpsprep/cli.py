@@ -1,9 +1,11 @@
 import functools
 import gc
+import json
 import logging
 import operator
 import os
 import pathlib
+from dataclasses import asdict
 from time import time
 
 import click
@@ -159,10 +161,18 @@ def dpsprep(
     if os.path.exists(output) and os.path.samefile(src, output):
         raise click.ClickException('The source and destination must be different files.')
 
-    workdir = initialize_workdir(src, dest, tmp_root, delete_working)
-
-    if not overwrite and workdir.dest.exists():
-        raise click.ClickException(f'File {workdir.dest} already exists.')
+    if not overwrite and os.path.exists(output):
+        raise click.ClickException(f'File {output} already exists.')
+    settings_key = json.dumps([
+        src, str(pathlib.Path(output).absolute()), stream_to_dest, no_text, max_dpi,
+        ocr_options or socr_options, optlevel,
+        [asdict(group) for group in mode_overrides],
+        [asdict(group) for group in dpi_overrides],
+        [asdict(group) for group in quality_overrides],
+    ], sort_keys=True).encode()
+    workdir = click.get_current_context().with_resource(
+        initialize_workdir(src, dest, tmp_root, delete_working, settings_key=settings_key),
+    )
 
     options = DpsPrepOptions(
         workdir=workdir,
