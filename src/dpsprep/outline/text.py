@@ -63,8 +63,8 @@ class TextExtractVisitor(SExpressionVisitor[str]):
         return ''
 
     def visit_list_word(self, node: djvu.sexpr.ListExpression) -> str | None:
-        _, x1, y1, x2, y2, content, *rest = node
-        return self.visit(content)
+        _, x1, y1, x2, y2, *children = node
+        return ''.join(self.visit(child) or '' for child in children)
 
     visit_list_char = visit_list_word
 
@@ -159,14 +159,9 @@ class TextDrawVisitor(SExpressionVisitor):
             if not isinstance(child, djvu.sexpr.StringExpression):
                 self.visit(child)
 
-    def visit_list_column(self, node: djvu.sexpr.ListExpression) -> None:
-        _, x1, y1, x2, y2, *rest = node
-
-        for child in rest:
-            self.visit(child)
-
-    visit_list_page = visit_list_column
-    visit_list_region = visit_list_column
+    visit_list_column = visit_list_para
+    visit_list_page = visit_list_para
+    visit_list_region = visit_list_para
 
     def visit_plain_list(self, node: djvu.sexpr.ListExpression) -> None:
         if len(node) == 0:
@@ -174,12 +169,8 @@ class TextDrawVisitor(SExpressionVisitor):
         else:
             logger.debug(f'Ignoring unrecognized but nonempty list expression {node}.')
 
-    def visit_string(self, node: djvu.sexpr.StringExpression) -> None:
-        if len(node.value) == 0:
-            logger.debug('Ignoring empty string expression.')
-        else:
-            print(node.value)
-            logger.debug(f'Ignoring unrecognized but nonempty string expression {node.value}.')
+    def visit_string(self, _node: djvu.sexpr.StringExpression) -> None:
+        logger.debug('Ignoring unpositioned text expression.')
 
 
 class TextExtractionTracker(Protocol):

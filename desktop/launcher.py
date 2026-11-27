@@ -1,6 +1,7 @@
 """PyInstaller entry point for the desktop application."""
 
 import multiprocessing
+import sys
 
 
 if __name__ == '__main__':
@@ -8,6 +9,12 @@ if __name__ == '__main__':
     # PyInstaller must divert its special child-process command line early.
     multiprocessing.freeze_support()
 
-    from dpsprep_desktop.app import main
+    if sys.argv[1:2] == ['--run-dpsprep']:
+        from dpsprep.cli import dpsprep
 
-    main()
+        del sys.argv[1]
+        dpsprep()
+    else:
+        from dpsprep_desktop.app import main
+
+        main()

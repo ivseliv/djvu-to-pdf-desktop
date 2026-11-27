@@ -58,7 +58,7 @@ def combine_prepared_document(
                 options.workdir.combined_pdf_path,
             )
     else:
-        combine_pdfs_on_fs_with_text(options, outline)
+        combine_pdfs_on_fs_with_text(options, outline, page_count)
 
 
 def combine_document(options: DpsPrepOptions, document: djvu.decode.Document) -> None:

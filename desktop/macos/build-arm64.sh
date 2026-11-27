@@ -14,7 +14,7 @@ if [ -z "$qpdf_lib" ]; then
 fi
 
 cd "$project_root"
-uv run --with 'pyinstaller>=6.12' pyinstaller \
+uv run --frozen --no-default-groups --with 'pyinstaller>=6.12' pyinstaller \
     --noconfirm \
     --windowed \
     --name 'DjVu to PDF' \

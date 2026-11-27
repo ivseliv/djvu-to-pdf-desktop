@@ -32,6 +32,7 @@ def find_qpdf() -> Path:
         bundle_root = Path(getattr(sys, '_MEIPASS', Path(sys.executable).parent))
         candidates.extend([
             bundle_root / 'qpdf' / 'bin' / 'qpdf',
+            bundle_root / 'qpdf' / 'bin' / 'qpdf.exe',
             Path(sys.executable).parent.parent / 'Frameworks' / 'qpdf' / 'bin' / 'qpdf',
             Path(sys.executable).parent / 'qpdf' / 'bin' / 'qpdf.exe',
         ])
@@ -151,7 +152,9 @@ def _validate_text_pages(path: Path, text_reference: Path, expected_pages: int) 
 
 
 def _sample_pages(expected_pages: int) -> list[int]:
-    return sorted({int(index * (expected_pages - 1) / 19) for index in range(min(20, expected_pages))})
+    if expected_pages <= 20:
+        return list(range(expected_pages))
+    return [index * (expected_pages - 1) // 19 for index in range(20)]
 
 
 def _page_has_text(page: pikepdf.Page) -> bool:

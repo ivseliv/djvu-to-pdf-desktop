@@ -9,12 +9,19 @@ from djvu import sexpr
 
 from dpsprep.outline.outline import OutlineTransformVisitor
 from dpsprep.pdf import IncrementalChunkAssembler, _write_chunks_to_destination
-from dpsprep.qpdf import find_qpdf, merge_pdfs, validate_chunk_text, validate_output
-from dpsprep.workdir import WorkingDirectory
+from dpsprep.qpdf import _sample_pages, find_qpdf, merge_pdfs, validate_chunk_text, validate_output
+from dpsprep.workdir import WorkingDirectory, writing_checkpoint
 
 
 if TYPE_CHECKING:
     from dpsprep.options import DpsPrepOptions
+
+
+def _blank_pdf(path: Path, pages: int = 1) -> None:
+    with pikepdf.Pdf.new() as pdf:
+        for _ in range(pages):
+            pdf.add_blank_page(page_size=(100, 100))
+        pdf.save(path)
 
 
 @pytest.mark.skipif(shutil.which('qpdf') is None, reason='qpdf executable is required')
@@ -110,7 +117,7 @@ def test_chunk_validation_checks_text_before_large_merge(tmp_path: Path) -> None
 def test_working_disk_shortage_is_detected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     workdir = WorkingDirectory(tmp_path / 'source.djvu', tmp_path / 'output.pdf', tmp_path)
     options = SimpleNamespace(workdir=workdir, no_text=True)
-    (tmp_path / 'chunk_0001.pdf').write_bytes(b'x' * 1024)
+    _blank_pdf(tmp_path / 'chunk_0001.pdf', 64)
     assembler = IncrementalChunkAssembler(cast('DpsPrepOptions', options), 64)
     monkeypatch.setattr('dpsprep.pdf.shutil.disk_usage', lambda _path: SimpleNamespace(free=0))
 
@@ -121,9 +128,54 @@ def test_working_disk_shortage_is_detected(monkeypatch: pytest.MonkeyPatch, tmp_
 def test_assembler_resumes_from_an_existing_chunk(tmp_path: Path) -> None:
     workdir = WorkingDirectory(tmp_path / 'source.djvu', tmp_path / 'output.pdf', tmp_path)
     options = SimpleNamespace(workdir=workdir, no_text=True)
-    (tmp_path / 'chunk_0001.pdf').write_bytes(b'already assembled')
+    _blank_pdf(tmp_path / 'chunk_0001.pdf', 64)
     assembler = IncrementalChunkAssembler(cast('DpsPrepOptions', options), 64)
 
     assembler.consume_ready()
 
     assert assembler.next_page == 64
+
+
+def test_incomplete_legacy_chunk_keeps_ready_pages(tmp_path: Path) -> None:
+    workdir = WorkingDirectory(tmp_path / 'source.djvu', tmp_path / 'output.pdf', tmp_path)
+    options = SimpleNamespace(workdir=workdir, no_text=True)
+    (tmp_path / 'chunk_0001.pdf').write_bytes(b'incomplete')
+    _blank_pdf(workdir.get_page_pdf_path(0))
+    assembler = IncrementalChunkAssembler(cast('DpsPrepOptions', options), 2)
+    assembler.mark_page_ready(0)
+    assembler.consume_ready()
+    assert assembler.next_page == 0
+    assert workdir.get_page_pdf_path(0).exists()
+
+
+def test_failed_checkpoint_write_does_not_replace_previous_result(tmp_path: Path) -> None:
+    target = tmp_path / 'merged.pdf'
+    target.write_bytes(b'previous result')
+
+    def incomplete_write() -> None:
+        with writing_checkpoint(target) as partial:
+            partial.write_bytes(b'incomplete')
+            raise OSError('out of space')
+
+    with pytest.raises(OSError, match='out of space'):
+        incomplete_write()
+    assert target.read_bytes() == b'previous result'
+    assert list(tmp_path.iterdir()) == [target]
+
+
+def test_chunk_images_are_not_retained_by_text_reader(tmp_path: Path) -> None:
+    workdir = WorkingDirectory(tmp_path / 'book.djvu', tmp_path / 'out.pdf', tmp_path)
+    _blank_pdf(workdir.text_layer_pdf_path)
+    _blank_pdf(workdir.get_page_pdf_path(0))
+    options = SimpleNamespace(workdir=workdir, no_text=False)
+    assembler = IncrementalChunkAssembler(cast('DpsPrepOptions', options), 1)
+    assembler.mark_text_ready()
+    assembler.mark_page_ready(0)
+    assembler.consume_ready()
+    assert assembler.text_pdf is not None
+    assert assembler.text_pdf.pages[0].inheritable.Resources.XObject is None
+
+
+def test_short_books_validate_last_page() -> None:
+    assert _sample_pages(3) == [0, 1, 2]
+    assert _sample_pages(6236)[-1] == 6235

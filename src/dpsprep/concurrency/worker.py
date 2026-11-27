@@ -95,6 +95,14 @@ class SubprocessWorker:
         process_text(self.options, document, tracker)
         self.child_conn.send(TextLayerFinishedMessage())
 
+    def process_stripe(self, worker_id: int, page_limit: SharedPageLimit | None, resume_page: int) -> None:
+        try:
+            if worker_id == 0 and not self.options.no_text:
+                self.process_text()
+            self.process_page_bg(worker_id, page_limit, resume_page)
+        finally:
+            self.child_conn.close()
+
     def process_page_bg(
         self,
         worker_id: int,

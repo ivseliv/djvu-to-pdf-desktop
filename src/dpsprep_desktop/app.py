@@ -2,25 +2,20 @@
 
 from __future__ import annotations
 
-import errno
-import os
 import queue
-import shutil
-import signal
 import subprocess
-import sys
 import threading
 import tkinter as tk
 from collections.abc import Callable  # ruff: ignore[typing-only-standard-library-import]
 from contextlib import suppress
-from dataclasses import replace
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Any
 
 from . import __version__
 from .core import ConversionSettings, build_command, default_output_path
-from .jobs import create_job, job_size, read_manifest, recoverable_jobs, remove_job, write_manifest
+from .jobs import JobBusyError, job_size, lock_job, read_manifest, recoverable_jobs, remove_job
+from .runner import ConversionRunner
 
 
 BACKGROUND = '#F4F6FA'
@@ -58,11 +53,6 @@ RESOLUTION_LABELS = {
     '200 dpi': 200,
     '150 dpi': 150,
 }
-PROGRESS_PREFIX = '__DPSPREP_PROGRESS__ '
-COMBINE_PROGRESS_PREFIX = '__DPSPREP_COMBINE_PROGRESS__ '
-QPDF_PROGRESS_PREFIX = '__DPSPREP_QPDF_PROGRESS__ '
-TEXT_PROGRESS_PREFIX = '__DPSPREP_TEXT_PROGRESS__ '
-VALIDATION_PROGRESS_PREFIX = '__DPSPREP_VALIDATION_ACTIVE__ '
 
 
 class ConverterApp(ttk.Frame):
@@ -99,9 +89,9 @@ class ConverterApp(ttk.Frame):
         self.page_progress = 0.0
         self.mode_hint = tk.StringVar(value=MODE_HINTS['infer'])
         self.events: queue.Queue[tuple[str, Any]] = queue.Queue()
-        self.process: subprocess.Popen[str] | None = None
-        self.active_job: Path | None = None
-        self.resume_job: Path | None = None
+        self.runner = ConversionRunner(self.events)
+        self.running = False
+        self.closing = False
 
         self._build()
         self.root.protocol('WM_DELETE_WINDOW', self._close)
@@ -305,9 +295,9 @@ class ConverterApp(ttk.Frame):
         chosen = filedialog.askopenfilename(title='Выберите DjVu-файл', filetypes=(('DjVu', '*.djvu *.djv'), ('Все файлы', '*')))
         if chosen:
             source = Path(chosen)
-            self.source.set(str(source))
-            if not self.output.get():
+            if str(source) != self.source.get() or not self.output.get():
                 self.output.set(str(default_output_path(source)))
+            self.source.set(str(source))
             self.status.set('Готово к конвертации.')
 
     def _choose_output(self) -> None:
@@ -328,14 +318,17 @@ class ConverterApp(ttk.Frame):
         settings = self._settings()
         if not settings.source.is_file():
             raise ValueError('Выберите существующий DjVu-файл.')
-        if settings.output.exists() and not settings.overwrite:
-            raise ValueError('PDF с таким именем уже существует.')
+        if settings.output.exists():
+            if settings.source.samefile(settings.output):
+                raise ValueError('Выберите другой путь для PDF: он совпадает с исходным DjVu.')
+            if not settings.overwrite:
+                raise ValueError('PDF с таким именем уже существует.')
         return settings, build_command(settings)
 
     def _start(self) -> None:
         try:
             settings, command = self._validated_start_settings()
-        except ValueError as error:
+        except (ValueError, OSError) as error:
             messagebox.showerror('Не удалось начать', str(error), parent=self.root)
             return
         self._append('$ ' + subprocess.list2cmdline(command) + '\n')
@@ -346,190 +339,26 @@ class ConverterApp(ttk.Frame):
         self.progress_area.pack(fill='x', pady=(12, 0), before=self.log_toggle)
         self.convert_button.configure(state='disabled')
         self.cancel_button.configure(state='normal')
-        threading.Thread(target=self._run, args=(settings,), daemon=True).start()
-
-    # ruff: ignore[complex-structure]
-    def _run(self, settings: ConversionSettings) -> None:
-        job = self.resume_job or create_job(settings, __version__)
-        self.active_job = job
-        try:  # ruff: ignore[too-many-statements-in-try-clause]
-            manifest = read_manifest(job) or {}
-            staged_output = job / 'result.pdf'
-            if manifest.get('state') == 'published' and settings.output.exists():
-                remove_job(job)
-                self.resume_job = None
-                self.events.put(('complete', 0))
-                return
-            if manifest.get('state') == 'save_failed' and staged_output.exists():
-                self.events.put(('status', 'Повторно сохраняю готовый PDF…'))
-                self._publish_result(staged_output, settings.output)
-                write_manifest(job, {'state': 'published'})
-                remove_job(job)
-                self.resume_job = None
-                self.events.put(('complete', 0))
-                return
-
-            worker_settings = replace(
-                settings,
-                output=staged_output,
-                overwrite=True,
-                tmp_root=job,
-                preserve_working=True,
-            )
-            if sys.platform == 'darwin' and getattr(sys, 'frozen', False):
-                # A file chosen in a macOS open dialog can be readable by this
-                # GUI process but not by the re-launched PyInstaller worker.
-                # Keep both endpoints in the staging directory, then let the
-                # GUI save the completed PDF using its dialog-granted access.
-                # Creating an arbitrary sibling of the selected destination
-                # can block under macOS privacy controls.
-                staged_source = job / f'source{settings.source.suffix.lower()}'
-                self.events.put(('status', 'Подготавливаю DjVu для конвертации…'))
-                self._stage_source(settings.source, staged_source)
-                worker_settings = replace(worker_settings, source=staged_source)
-
-            command = build_command(worker_settings)
-            write_manifest(job, {'state': 'running'})
-            creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
-            self.process = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding='utf-8',
-                errors='replace',
-                env={**os.environ, 'DPSPREP_GUI_PROGRESS': '1'},
-                start_new_session=(os.name == 'posix'),
-                creationflags=creation_flags,
-            )
-            write_manifest(job, {'pid': self.process.pid})
-            assert self.process.stdout is not None
-            for line in self.process.stdout:
-                if line.startswith(PROGRESS_PREFIX):
-                    try:
-                        completed, total = line.removeprefix(PROGRESS_PREFIX).strip().split('/', maxsplit=1)
-                        self.events.put(('progress', (int(completed), int(total))))
-                    except ValueError:
-                        self.events.put(('log', line))
-                elif line.startswith(COMBINE_PROGRESS_PREFIX):
-                    try:
-                        completed, total = line.removeprefix(COMBINE_PROGRESS_PREFIX).strip().split('/', maxsplit=1)
-                        self.events.put(('combine', (int(completed), int(total))))
-                    except ValueError:
-                        self.events.put(('log', line))
-                elif line.startswith(QPDF_PROGRESS_PREFIX):
-                    try:
-                        self.events.put(('qpdf', int(line.removeprefix(QPDF_PROGRESS_PREFIX).strip())))
-                    except ValueError:
-                        self.events.put(('log', line))
-                elif line.startswith(TEXT_PROGRESS_PREFIX):
-                    try:
-                        completed, total = line.removeprefix(TEXT_PROGRESS_PREFIX).strip().split('/', maxsplit=1)
-                        self.events.put(('text-progress', (int(completed), int(total))))
-                    except ValueError:
-                        self.events.put(('log', line))
-                elif line.startswith(VALIDATION_PROGRESS_PREFIX):
-                    try:
-                        self.events.put(('validation', int(line.removeprefix(VALIDATION_PROGRESS_PREFIX).strip())))
-                    except ValueError:
-                        self.events.put(('log', line))
-                else:
-                    self.events.put(('log', line))
-            return_code = self.process.wait()
-            if return_code == 0:
-                self.events.put(('status', 'Сохраняю готовый PDF…'))
-                write_manifest(job, {'state': 'saving'})
-                try:
-                    self._publish_result(worker_settings.output, settings.output)
-                    write_manifest(job, {'state': 'published'})
-                except (OSError, shutil.Error):
-                    write_manifest(job, {'state': 'save_failed'})
-                    raise
-                remove_job(job)
-                self.resume_job = None
-            else:
-                write_manifest(job, {'state': 'failed', 'return_code': return_code})
-            self.events.put(('complete', return_code))
-        except (OSError, shutil.Error) as error:
-            if job.exists():
-                manifest = read_manifest(job) or {}
-                state = 'save_failed' if manifest.get('state') == 'save_failed' else 'failed'
-                write_manifest(job, {'state': state, 'error': str(error)})
-            self.events.put(('log', f'Не удалось запустить конвертер: {error}\n'))
-            self.events.put(('complete', 1))
-        finally:
-            self.active_job = None
+        self.runner.cancel_requested.clear()
+        self.running = True
+        threading.Thread(target=self.runner.run, args=(settings,), daemon=True).start()
 
     def _cancel(self) -> None:
-        if self.process and self.process.poll() is None:
-            self.status.set('Отмена…')
-            if os.name == 'posix':
-                os.killpg(self.process.pid, signal.SIGTERM)
-            else:
-                subprocess.run(
-                    ['taskkill', '/PID', str(self.process.pid), '/T', '/F'],
-                    check=False,
-                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
-                )
-            if self.active_job is not None:
-                write_manifest(self.active_job, {'state': 'cancelled'})
-
-    def _copy_with_progress(self, source: Path, destination: Path, phase: str) -> None:
-        total = source.stat().st_size
-        if phase == 'save':
-            free = shutil.disk_usage(destination.parent).free
-            if free < total + 1024**3:
-                raise OSError(
-                    f'Недостаточно места для сохранения: нужно {(total + 1024**3) / 1024**3:.1f} ГБ, '
-                    f'доступно {free / 1024**3:.1f} ГБ. Готовый PDF сохранён во временном задании.',
-                )
-        completed = 0
-        with source.open('rb') as input_file, destination.open('wb') as output_file:
-            while block := input_file.read(8 * 1024 * 1024):
-                output_file.write(block)
-                completed += len(block)
-                self.events.put(('transfer', (phase, completed, total)))
-        shutil.copystat(source, destination)
-
-    def _stage_source(self, source: Path, destination: Path) -> None:
-        expected_size = source.stat().st_size
-        if destination.exists() and destination.stat().st_size == expected_size:
-            return
-        self.events.put(('log', 'macOS: копирую исходный DjVu во временную папку.\n'))
-        partial = destination.with_suffix(f'{destination.suffix}.partial')
-        try:
-            partial.unlink(missing_ok=True)
-            self._copy_with_progress(source, partial, 'prepare')
-            partial.replace(destination)
-        finally:
-            partial.unlink(missing_ok=True)
-
-    def _publish_result(self, source: Path, destination: Path) -> None:
-        """Publish by atomic rename when possible, avoiding a second huge copy."""
-        total = source.stat().st_size
-        try:
-            source.replace(destination)
-        except OSError as error:
-            if error.errno not in {errno.EXDEV, errno.EACCES, errno.EPERM}:
-                raise
-            partial = destination.with_name(f'.{destination.name}.dpsprep-{os.getpid()}.partial')
-            try:
-                self._copy_with_progress(source, partial, 'save')
-                partial.replace(destination)
-                source.unlink()
-            finally:
-                partial.unlink(missing_ok=True)
-        else:
-            self.events.put(('transfer', ('save', total, total)))
+        self.status.set('Отмена…')
+        self.runner.cancel()
 
     def _close(self) -> None:
-        if self.process and self.process.poll() is None:
+        if self.running:
             if not messagebox.askyesno('Прервать конвертацию?', 'Конвертация ещё идёт. Прервать её и закрыть приложение?', parent=self.root):
                 return
             self._cancel()
+            self.closing = True
+            return
         self.root.destroy()
 
     def _offer_recovery(self) -> None:
+        if self.running:
+            return
         jobs = recoverable_jobs()
         if not jobs:
             return
@@ -543,10 +372,11 @@ class ConverterApp(ttk.Frame):
             parent=self.root,
         )
         if answer is True:
-            self.resume_job = job
+            self.runner.resume_job = job
             self.source.set(str(manifest.get('source', '')))
             self.output.set(str(manifest.get('output', '')))
             self.keep_text.set(bool(manifest.get('preserve_text', True)))
+            self.overwrite.set(bool(manifest.get('overwrite', True)))
             mode = str(manifest.get('image_mode', 'infer'))
             for label, value in MODE_LABELS.items():
                 if value == mode:
@@ -559,8 +389,7 @@ class ConverterApp(ttk.Frame):
             self.pool_size.set('' if pool_size is None else str(pool_size))
             self.status.set('Незавершённое задание готово к продолжению.')
         elif answer is False:
-            for stale_job in jobs:
-                remove_job(stale_job)
+            self._remove_inactive_jobs(jobs)
             self.status.set('Временные задания удалены.')
 
     def _clean_jobs(self) -> None:
@@ -574,10 +403,15 @@ class ConverterApp(ttk.Frame):
             f'Будет удалено заданий: {len(jobs)}\nОбщий размер: {total / 1024**3:.1f} ГБ',
             parent=self.root,
         ):
-            for job in jobs:
-                remove_job(job)
-            self.resume_job = None
+            self._remove_inactive_jobs(jobs)
+            self.runner.resume_job = None
             self.status.set('Временные файлы удалены.')
+
+    @staticmethod
+    def _remove_inactive_jobs(jobs: list[Path]) -> None:
+        for job in jobs:
+            with suppress(JobBusyError, FileNotFoundError), lock_job(job):
+                remove_job(job)
 
     # ruff: ignore[complex-structure]
     def _drain_events(self) -> None:
@@ -637,14 +471,20 @@ class ConverterApp(ttk.Frame):
                     self.progress_text.set(f'Полная проверка PDF выполняется · {elapsed // 60}:{elapsed % 60:02d}')
                 else:
                     return_code = int(value)
-                    self.process = None
+                    self.running = False
                     self.convert_button.configure(state='normal')
                     self.cancel_button.configure(state='disabled')
+                    if self.closing:
+                        self.root.destroy()
+                        return
                     if return_code == 0:
                         self.progress_value.set(100)
                         self.progress_text.set('Готово · 100%')
                         self.status.set('Готово — PDF создан.')
                         self._append('\nКонвертация завершена.\n')
+                    elif self.runner.cancel_requested.is_set():
+                        self.status.set('Конвертация отменена.')
+                        self.progress_text.set('Отменено')
                     else:
                         self.status.set('Конвертация не завершилась.')
                         self._append(f'\nПроцесс завершился с кодом {return_code}.\n')
@@ -666,12 +506,6 @@ class ConverterApp(ttk.Frame):
 
 
 def main() -> None:
-    if len(sys.argv) > 1 and sys.argv[1] == '--run-dpsprep':
-        from dpsprep.cli import dpsprep  # ruff: ignore[import-outside-top-level]
-
-        sys.argv = [sys.argv[0], *sys.argv[2:]]
-        dpsprep()
-        return
     root = tk.Tk()
     ConverterApp(root)
     root.mainloop()

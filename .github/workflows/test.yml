@@ -34,11 +34,11 @@ jobs:
       if: matrix.os == 'ubuntu-slim'
       run: |
         sudo apt update
-        sudo apt install --yes libdjvulibre21 libdjvulibre-dev
+        sudo apt install --yes build-essential pkg-config libdjvulibre-dev libxml2-dev libxslt1-dev qpdf poppler-utils
 
     - name: Install prerequisites on macOS
       if: matrix.os == 'macos-26'
-      run: brew install djvulibre
+      run: brew install djvulibre qpdf poppler
 
     # - name: Install prerequisites on Windows
     #   if: matrix.os == 'windows-2022'
@@ -56,3 +56,11 @@ jobs:
 
     - name: Test
       run: uv run --no-sync pytest
+
+    - name: Convert a searchable DjVu with two workers
+      run: |
+        uv run --no-sync dpsprep --stream-to-dest --pool-size 2 --tmp "$RUNNER_TEMP" fixtures/lipsum_words.djvu "$RUNNER_TEMP/result.pdf"
+        qpdf --check "$RUNNER_TEMP/result.pdf"
+        test "$(qpdf --show-npages "$RUNNER_TEMP/result.pdf")" = 2
+        pdftotext "$RUNNER_TEMP/result.pdf" "$RUNNER_TEMP/result.txt"
+        grep -i 'Lorem ipsum' "$RUNNER_TEMP/result.txt"

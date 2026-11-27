@@ -1,35 +1,28 @@
-# Due to some compatibility issues, we only support multiprocessing-based concurrency with explicit message passing.
-# This is discussed in the concurrency notes in the project's wiki.
-
 import logging
 import multiprocessing
 import os
-from multiprocessing.pool import Pool
-from typing import TYPE_CHECKING
+from collections.abc import Generator
+from contextlib import closing
+from multiprocessing.connection import Connection, wait
+from typing import cast
 
 import djvu.decode
-from rich.progress import Progress, TaskID
+from rich.progress import Progress
 
 from dpsprep.exceptions import DpsPrepConcurrencyError
 from dpsprep.options import DpsPrepOptions
-from dpsprep.pdf import CHUNK_SIZE, IncrementalChunkAssembler
+from dpsprep.pdf import CHUNK_SIZE, IncrementalChunkAssembler, is_valid_pdf
 
 from .counter import PageCounter
 from .message import (
-    ExceptionWorkerMessage,
     ImagePageProcessedMessage,
     LogRecordWorkerMessage,
     TextLayerAlreadyProcessedMessage,
     TextLayerFinishedMessage,
     TextPageProcessedMessage,
+    WorkerMessage,
 )
-from .worker import SubprocessWorker
-
-
-if TYPE_CHECKING:
-    from multiprocessing.connection import Connection
-
-    from .message import WorkerMessage
+from .worker import SharedPageLimit, SubprocessWorker
 
 
 logger = logging.getLogger(__name__)
@@ -38,151 +31,103 @@ TEXT_PROGRESS_PREFIX = '__DPSPREP_TEXT_PROGRESS__ '
 
 
 class SubprocessPageProcessor:
-    options: DpsPrepOptions
-    document: djvu.decode.Document
-
-    parent_conn: 'Connection[WorkerMessage]'
-    child_conn: 'Connection[WorkerMessage]'
-    pool: Pool
-
-    rich_progress: Progress
-    rich_task: TaskID
-
     def __init__(self, options: DpsPrepOptions, document: djvu.decode.Document) -> None:
         self.options = options
         self.document = document
 
-        self.parent_conn, self.child_conn = multiprocessing.Pipe()
-        self.pool = Pool(processes=self.options.pool_size)
+    def _worker_messages(self, page_limit: SharedPageLimit | None, resume_page: int) -> Generator[WorkerMessage, None, None]:
+        # One writer per pipe prevents concurrent large log messages from
+        # corrupting one another. EOF also lets us detect a native worker crash.
+        readers: dict[Connection, multiprocessing.Process] = {}
+        try:
+            for worker_id in range(min(self.options.pool_size, len(self.document.pages))):
+                reader, writer = multiprocessing.Pipe(duplex=False)
+                worker = SubprocessWorker(self.options, writer)
+                process = multiprocessing.Process(target=worker.process_stripe, args=(worker_id, page_limit, resume_page))
+                try:
+                    process.start()
+                except BaseException:
+                    reader.close()
+                    raise
+                finally:
+                    writer.close()
+                readers[reader] = process
 
-    def on_child_error(self, err: BaseException | None) -> None:
-        if err:
-            logger.exception('Worker error.', exc_info=err)
-            self.child_conn.send(ExceptionWorkerMessage(err))
+            while readers:
+                for reader in cast('list[Connection]', wait(readers)):
+                    try:
+                        message = reader.recv()
+                    except EOFError:
+                        process = readers.pop(reader)
+                        reader.close()
+                        process.join()
+                        if process.exitcode:
+                            raise DpsPrepConcurrencyError(f'Worker {process.pid} exited with code {process.exitcode}.') from None
+                    else:
+                        yield message
+        finally:
+            for reader, process in readers.items():
+                if process.is_alive():
+                    process.terminate()
+                process.join()
+                reader.close()
 
     # ruff: ignore[complex-structure]
     def process(self) -> None:
-        worker = SubprocessWorker(self.options, self.child_conn)
         counter = PageCounter(len(self.document.pages))
-        if self.options.no_text:
-            for page in range(counter.total):
-                counter.text[page] = True
-
-        rich_progress = Progress()
-        rich_task = rich_progress.add_task('Processing pages', total=counter.total)
         report_progress = os.environ.get('DPSPREP_GUI_PROGRESS') == '1'
         assembler = IncrementalChunkAssembler(self.options, counter.total) if self.options.stream_to_dest else None
-        if assembler is not None and (self.options.no_text or self.options.workdir.text_layer_pdf_path.exists()):
-            if not self.options.no_text:
+        if assembler is not None:
+            if not self.options.no_text and is_valid_pdf(self.options.workdir.text_layer_pdf_path, counter.total):
                 assembler.mark_text_ready()
-            # Resume from already completed chunks before workers receive
-            # their initial page window. Otherwise a restarted job needlessly
-            # renders its first pages again while text recovery is starting.
             assembler.consume_ready()
-        manager = multiprocessing.Manager() if assembler is not None else None
-        page_limit = (
-            manager.Value('i', min(counter.total, assembler.next_page + CHUNK_SIZE * 2))
-            if manager is not None and assembler is not None
-            else None
-        )
         resume_page = assembler.next_page if assembler is not None else 0
-        for page in range(resume_page):
-            counter.images[page] = True
-            counter.text[page] = True
-        if resume_page:
-            rich_progress.update(rich_task, completed=resume_page)
-        workers_joined = False
+        if resume_page == counter.total:
+            return
+        page_limit = multiprocessing.Value('i', min(counter.total, resume_page + CHUNK_SIZE * 2)) if assembler else None
+        for page in range(counter.total):
+            counter.text[page] = self.options.no_text or page < resume_page
+            counter.images[page] = page < resume_page
 
-        def advance_progress() -> None:
-            rich_progress.advance(rich_task)
-            if report_progress:
-                completed = int(rich_progress.tasks[rich_task].completed)
-                print(f'{PROGRESS_PREFIX}{completed}/{counter.total}', flush=True)
+        with Progress() as progress, closing(self._worker_messages(page_limit, resume_page)) as messages:
+            task = progress.add_task('Processing pages', total=counter.total, completed=resume_page)
 
-        try:  # ruff: ignore[too-many-nested-blocks]
-            with rich_progress:
-                if not self.options.no_text:
-                    self.pool.apply_async(
-                        worker.process_text,
-                        error_callback=self.on_child_error,
-                    )
+            def advance_progress() -> None:
+                progress.advance(task)
+                if report_progress:
+                    completed = int(progress.tasks[task].completed)
+                    print(f'{PROGRESS_PREFIX}{completed}/{counter.total}', flush=True)
 
-                for worker_id in range(self.options.pool_size):
-                    self.pool.apply_async(
-                        worker.process_page_bg, [worker_id, page_limit, resume_page],
-                        error_callback=self.on_child_error,
-                    )
-
-                self.pool.close()
-
-                while not rich_progress.finished:
-                    # ruff: ignore[too-many-statements-in-try-clause]
-                    try:
-                        if self.parent_conn.poll(0.1):
-                            match message := self.parent_conn.recv():
-                                case ExceptionWorkerMessage():
-                                    # ruff: ignore[raise-within-try]
-                                    raise DpsPrepConcurrencyError('Worker error') from message.error
-
-                                case LogRecordWorkerMessage():
-                                    logger.handle(message.record)
-
-                                case ImagePageProcessedMessage():
-                                    counter.images[message.page] = True
-
-                                    if assembler is not None:
-                                        assembler.mark_page_ready(message.page)
-                                        assembler.consume_ready()
-                                        if page_limit is not None:
-                                            page_limit.value = min(counter.total, assembler.next_page + CHUNK_SIZE * 2)
-
-                                    if counter.text[message.page]:
-                                        advance_progress()
-
-                                case TextPageProcessedMessage():
-                                    was_processed = counter.text[message.page]
-                                    counter.text[message.page] = True
-                                    if report_progress:
-                                        print(f'{TEXT_PROGRESS_PREFIX}{message.page + 1}/{counter.total}', flush=True)
-
-                                    if counter.images[message.page] and not was_processed:
-                                        advance_progress()
-
-                                case TextLayerAlreadyProcessedMessage():
-                                    if report_progress:
-                                        print(f'{TEXT_PROGRESS_PREFIX}{counter.total}/{counter.total}', flush=True)
-                                    for page in range(counter.total):
-                                        was_processed = counter.text[page]
-                                        counter.text[page] = True
-
-                                        if counter.images[page] and not was_processed:
-                                            advance_progress()
-
-                                case TextLayerFinishedMessage():
-                                    if assembler is not None:
-                                        assembler.mark_text_ready()
-                                        assembler.consume_ready()
-                                        if page_limit is not None:
-                                            page_limit.value = min(counter.total, assembler.next_page + CHUNK_SIZE * 2)
-
-                    except KeyboardInterrupt:
-                        logger.info('Conversion interrupted. Terminating all workers.')
-                        raise
-
-                    except DpsPrepConcurrencyError:
-                        logger.info('Terminating all other workers.')
-                        raise
-
-                self.pool.join()
-                workers_joined = True
-                if assembler is not None:
+            for message in messages:
+                match message:
+                    case LogRecordWorkerMessage():
+                        logger.handle(message.record)
+                    case ImagePageProcessedMessage():
+                        counter.images[message.page] = True
+                        if counter.text[message.page]:
+                            advance_progress()
+                        if assembler is not None:
+                            assembler.mark_page_ready(message.page)
+                    case TextPageProcessedMessage():
+                        if counter.images[message.page] and not counter.text[message.page]:
+                            advance_progress()
+                        counter.text[message.page] = True
+                        if report_progress:
+                            print(f'{TEXT_PROGRESS_PREFIX}{message.page + 1}/{counter.total}', flush=True)
+                    case TextLayerAlreadyProcessedMessage():
+                        if report_progress:
+                            print(f'{TEXT_PROGRESS_PREFIX}{counter.total}/{counter.total}', flush=True)
+                        for page in range(counter.total):
+                            if counter.images[page] and not counter.text[page]:
+                                advance_progress()
+                            counter.text[page] = True
+                    case TextLayerFinishedMessage():
+                        if assembler is not None:
+                            assembler.mark_text_ready()
+                if assembler is not None and isinstance(message, (ImagePageProcessedMessage, TextLayerFinishedMessage)):
                     assembler.consume_ready()
-        finally:
-            # No worker may still be writing into the working directory when
-            # the CLI's outer cleanup runs.  This also covers disk-space and
-            # QPDF errors raised outside the worker-message error path.
-            if not workers_joined:
-                self.pool.terminate()
-                self.pool.join()
-            if manager is not None:
-                manager.shutdown()
+                    if page_limit is not None:
+                        page_limit.value = min(counter.total, assembler.next_page + CHUNK_SIZE * 2)
+
+            if not progress.finished:
+                raise DpsPrepConcurrencyError('Page workers stopped before processing all pages.')

@@ -23,10 +23,11 @@ jobs:
       run: uv sync --frozen --group docs --no-default-groups
 
     - name: Build docs
-      run: |
-        uv run --no-sync --module src.helpers.docs_cli build-dynamic-docs
-        mkdir .github/wiki
-        cp --recursive docs/*.md docs/screenshots .github/wiki
+      run: uv run --no-sync --module src.helpers.docs_cli build-dynamic-docs
 
-    - name: Upload to wiki
-      uses: spenserblack/actions-wiki@v0.3.0
+    - name: Save generated manual
+      uses: actions/upload-artifact@v4
+      with:
+        name: dpsprep-manual
+        path: docs/dpsprep.1.md
+        if-no-files-found: error

@@ -1,6 +1,8 @@
+import errno
 import os
 import pathlib
 import shutil
+import tempfile
 
 import click
 import pdfrw
@@ -9,15 +11,15 @@ from pdfrw.objects.pdfstring import PdfString
 
 from dpsprep.options import DpsPrepOptions
 from dpsprep.qpdf import merge_pdfs, validate_chunk_text, validate_output
+from dpsprep.workdir import writing_checkpoint
 
 
-def is_valid_pdf(path: pathlib.Path) -> bool:
+def is_valid_pdf(path: pathlib.Path, expected_pages: int | None = None) -> bool:
     try:
-        pdfrw.PdfReader(path)
-    except pdfrw.errors.PdfParseError:
+        with pikepdf.open(path, attempt_recovery=False) as pdf:
+            return expected_pages is None or len(pdf.pages) == expected_pages
+    except (FileNotFoundError, pikepdf.PdfError):
         return False
-    else:
-        return True
 
 
 CHUNK_SIZE = 64
@@ -66,15 +68,13 @@ class IncrementalChunkAssembler:
             chunk_path = _chunk_path(self.options, chunk_number)
             page_paths = [self.options.workdir.get_page_pdf_path(page) for page in range(first_page, last_page)]
 
-            if chunk_path.exists():
-                for page_path in page_paths:
-                    page_path.unlink(missing_ok=True)
-            elif all(page in self.completed_pages for page in range(first_page, last_page)):
-                self._write_chunk(chunk_path, first_page, last_page)
-                for page_path in page_paths:
-                    page_path.unlink(missing_ok=True)
-            else:
-                return
+            if not chunk_path.exists() or not is_valid_pdf(chunk_path, last_page - first_page):
+                if not all(page in self.completed_pages for page in range(first_page, last_page)):
+                    return
+                with writing_checkpoint(chunk_path) as partial:
+                    self._write_chunk(partial, first_page, last_page)
+            for page_path in page_paths:
+                page_path.unlink(missing_ok=True)
 
             self.next_page = last_page
             _report_combine_progress(chunk_number, self.total_chunks + 2)
@@ -89,7 +89,13 @@ class IncrementalChunkAssembler:
                 writer.addpage(image_page)
             else:
                 assert self.text_pdf is not None
-                text_page = self.text_pdf.pages[page_number]
+                # PageMerge mutates the page and its resource dictionaries.
+                # Keep image streams owned by this chunk, never by the cached
+                # whole-book text reader or other pages sharing font resources.
+                original = self.text_pdf.pages[page_number]
+                text_page = pdfrw.PdfDict(original)
+                text_page.Resources = pdfrw.PdfDict(original.inheritable.Resources or {})
+                text_page.Resources.XObject = pdfrw.PdfDict(text_page.Resources.XObject or {})
                 merger = pdfrw.PageMerge(text_page)
                 merger.add(image_page).render()
                 writer.addpage(text_page)
@@ -137,7 +143,8 @@ def _write_chunks_to_destination(
         )
     _report_combine_progress(progress_offset, progress_offset + 2)
     if not merged_path.exists():
-        merge_pdfs(chunks, merged_path, argument_path)
+        with writing_checkpoint(merged_path) as partial:
+            merge_pdfs(chunks, partial, argument_path)
         for chunk in chunks:
             chunk.unlink(missing_ok=True)
     _report_combine_progress(progress_offset + 1, progress_offset + 2)
@@ -160,20 +167,32 @@ def _finalize_merged_pdf(
             merged_path,
             expected_pages=expected_pages,
         )
-        merged_path.replace(destination)
-    else:
+        try:
+            merged_path.replace(destination)
+        except OSError as error:
+            if error.errno != errno.EXDEV:
+                raise
+        else:
+            return
+
+    with tempfile.NamedTemporaryFile(dir=destination.parent, suffix='.pdf', delete=False) as handle:
+        pending = pathlib.Path(handle.name)
+    try:
         # Opening one already merged PDF is lazy in QPDF. We modify only the
         # outline tree; page streams are copied by QPDF rather than imported
         # from thousands of independent Python PDF objects.
-        with pikepdf.open(merged_path) as output_pdf:
-            with output_pdf.open_outline() as output_outline:
-                output_outline.root.extend(_convert_outline_items(outline.First))
-            output_pdf.save(destination)
-        merged_path.unlink(missing_ok=True)
-        validate_output(
-            destination,
-            expected_pages=expected_pages,
-        )
+        if outline.First is None:
+            shutil.copyfile(merged_path, pending)
+        else:
+            with pikepdf.open(merged_path) as output_pdf:
+                with output_pdf.open_outline() as output_outline:
+                    output_outline.root.extend(_convert_outline_items(outline.First))
+                output_pdf.save(pending)
+            validate_output(pending, expected_pages=expected_pages)
+        pending.replace(destination)
+    finally:
+        pending.unlink(missing_ok=True)
+    merged_path.unlink(missing_ok=True)
 
 
 def _convert_outline_items(node: pdfrw.PdfDict | None) -> list[pikepdf.OutlineItem]:
@@ -230,10 +249,12 @@ def _stream_pages_in_chunks(
         chunk.unlink(missing_ok=True)
 
 
-def combine_pdfs_on_fs_with_text(options: DpsPrepOptions, outline: pdfrw.IndirectPdfDict) -> None:
+def combine_pdfs_on_fs_with_text(options: DpsPrepOptions, outline: pdfrw.IndirectPdfDict, page_count: int | None = None) -> None:
     if options.stream_to_dest:
-        text_pdf = pdfrw.PdfReader(options.workdir.text_layer_pdf_path)
-        _stream_pages_in_chunks(options, outline, len(text_pdf.pages), with_text=True)
+        if page_count is None:
+            with pikepdf.open(options.workdir.text_layer_pdf_path) as text_pdf:
+                page_count = len(text_pdf.pages)
+        _stream_pages_in_chunks(options, outline, page_count, with_text=True)
         return
 
     text_pdf = pdfrw.PdfReader(options.workdir.text_layer_pdf_path)

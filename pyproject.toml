@@ -39,9 +39,9 @@ classifiers = [
 ]
 
 [project.urls]
-Repository = "https://github.com/kcroker/dpsprep.git"
-Changelog = "https://github.com/kcroker/dpsprep/blob/master/CHANGELOG.md"
-Documentation = "https://github.com/kcroker/dpsprep/wiki"
+Repository = "https://github.com/ivseliv/djvu-to-pdf-desktop"
+Changelog = "https://github.com/ivseliv/djvu-to-pdf-desktop/blob/master/CHANGELOG.md"
+Documentation = "https://github.com/ivseliv/djvu-to-pdf-desktop/blob/master/README.md"
 
 [project.optional-dependencies]
 ocr = [

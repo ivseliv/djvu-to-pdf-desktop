@@ -2,6 +2,7 @@ import functools
 import gc
 import logging
 import operator
+import os
 import pathlib
 from time import time
 
@@ -22,6 +23,7 @@ from dpsprep.options import (
     SocrOptionClickType,
     get_default_pool_size,
 )
+from dpsprep.pdf import is_valid_pdf
 from dpsprep.qpdf import find_qpdf
 from dpsprep.range import RangeOptionGroup
 from dpsprep.workflow import (
@@ -36,7 +38,7 @@ from dpsprep.workflow import (
 logger = logging.getLogger(__name__)
 
 
-def open_djvu_document(source: str | pathlib.Path) -> object:
+def open_djvu_document(source: str | pathlib.Path) -> djvu.decode.Document:
     """Open a DjVu document, retrying one transient DjVuLibre failure.
 
     DjVuLibre can occasionally report ``JobFailed`` while creating a document
@@ -61,19 +63,20 @@ def open_djvu_document(source: str | pathlib.Path) -> object:
 
 
 def process_pages_or_resume(
-    ctx: click.Context,
     options: DpsPrepOptions,
-    document: object,
+    document: djvu.decode.Document,
     stream_to_dest: bool,
 ) -> None:
     if stream_to_dest and options.workdir.merged_pdf_path.exists():
-        logger.info('A fully assembled PDF was found; skipping page workers and resuming validation.')
-        return
+        if is_valid_pdf(options.workdir.merged_pdf_path, len(document.pages)):
+            logger.info('A fully assembled PDF was found; skipping page workers and resuming validation.')
+            return
+        logger.warning('Incomplete merged PDF found; rebuilding it from saved pages and blocks.')
+        options.workdir.merged_pdf_path.unlink()
     try:
         concurrently_process_pages(options, document)
-    except DpsPrepConcurrencyError:
-        # We assume that the actual error has been logged, so we ignore its message.
-        ctx.abort()
+    except DpsPrepConcurrencyError as error:
+        raise click.ClickException(str(error)) from error
 
 
 # OCR options
@@ -101,9 +104,7 @@ def process_pages_or_resume(
 @click.argument('dest', type=click.Path(exists=False, dir_okay=False, resolve_path=True), required=False)
 @click.argument('src', type=click.Path(exists=True, dir_okay=False, resolve_path=True), required=True)
 @click.command(epilog='See dpsprep(1) for more details.')
-@click.pass_context
 def dpsprep(
-    ctx: click.Context,
     # Positional arguments
     src: str,
     dest: str | None,
@@ -154,6 +155,10 @@ def dpsprep(
     if ocr_options and socr_options:
         raise click.ClickException('Cannot specify both --ocr and -socr simultaneously.')
 
+    output = pathlib.Path(dest) if dest else pathlib.Path(src).with_suffix('.pdf').name
+    if os.path.exists(output) and os.path.samefile(src, output):
+        raise click.ClickException('The source and destination must be different files.')
+
     workdir = initialize_workdir(src, dest, tmp_root, delete_working)
 
     if not overwrite and workdir.dest.exists():
@@ -182,7 +187,7 @@ def dpsprep(
         document = open_djvu_document(workdir.src)
         djvu_size = workdir.src.stat().st_size
 
-        process_pages_or_resume(ctx, options, document, stream_to_dest)
+        process_pages_or_resume(options, document, stream_to_dest)
 
         outline, page_count = prepare_document_combination(document)
         # Each DjVu document holds decoded page state and native caches. Free

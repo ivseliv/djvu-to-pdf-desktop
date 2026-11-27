@@ -1,5 +1,18 @@
 import pathlib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
+
+
+@contextmanager
+def writing_checkpoint(path: pathlib.Path) -> Iterator[pathlib.Path]:
+    """Publish a job-private checkpoint only after its writer has finished."""
+    partial = path.with_suffix('.partial.pdf')
+    try:
+        yield partial
+        partial.replace(path)
+    finally:
+        partial.unlink(missing_ok=True)
 
 
 @dataclass(frozen=True)

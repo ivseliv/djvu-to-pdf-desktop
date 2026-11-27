@@ -42,21 +42,22 @@ def process_djvu_page(
     mode: ImageMode,
     i: int,
     max_dpi: int | None = None,
+    dpi_override: int | None = None,
 ) -> ProcessedPageBackground:
     page_job = page.decode(wait=True)
     source_width, source_height = page_job.size
-    source_dpi = page_job.dpi
+    source_dpi = dpi_override or page_job.dpi
     resolution = min(source_dpi, max_dpi) if max_dpi is not None else source_dpi
     scale = resolution / source_dpi
     width = max(1, round(source_width * scale))
     height = max(1, round(source_height * scale))
-    buffer = bytearray(3 * width * height)  # RGB at most
-
     rect = (0, 0, width, height)
 
     if mode == ImageMode.INFER:
         mode = ImageMode.BITONAL if page_job.type == djvu.decode.PAGE_TYPE_BITONAL else ImageMode.RGB
 
+    row_bytes = {ImageMode.RGB: width * 3, ImageMode.GRAYSCALE: width, ImageMode.BITONAL: (width + 7) // 8}
+    buffer = bytearray(row_bytes[mode] * height)
     if mode == ImageMode.BITONAL:
         if not PIL.features.check_codec('libtiff'):
             logger.warning('Bitonal image compression may suffer because Pillow has been built without libtiff support.')
@@ -100,7 +101,7 @@ def process_djvu_page(
 
 def failsafe_save_djvu_page(page_bg: ProcessedPageBackground, target: pathlib.Path, options: DpsPrepOptions, i: int) -> None:
     quality = options.quality_overrides.get_value_for_zero_based_page(i)
-    dpi = options.dpi_overrides.get_value_for_zero_based_page(i) or page_bg.resolution
+    dpi = page_bg.resolution
 
     # JPEG quality is intentionally irrelevant for one-bit pages. Passing it
     # to Pillow's TIFF-backed PDF encoder raises ValueError and used to emit
@@ -117,7 +118,7 @@ def failsafe_save_djvu_page(page_bg: ProcessedPageBackground, target: pathlib.Pa
                 resolution=dpi,
             )
         except ValueError:
-            logger.warning(f'Failed to encode page {i}. Trying again without setting quality.')
+            logger.warning(f'Failed to encode page {i + 1}. Trying again without setting quality.')
         else:
             return
 

@@ -92,10 +92,11 @@ Invoke-SystemPython -c "import struct; assert struct.calcsize('P') == 8, 'Use a 
 Invoke-SystemPython -m venv $VenvRoot
 
 Invoke-VenvPython -m pip install --upgrade pip
-Invoke-VenvPython -m pip install "pyinstaller>=6.12"
-Invoke-VenvPython -m pip install $BindingWheel
-Invoke-VenvPython -m pip install --no-deps $ProjectRoot
-Invoke-VenvPython -m pip install "click>=8" "fpdf2>=2.8.6" "pdfrw>=0.4" "pikepdf>=10.5.1" "pillow>=12.2.0" "rich>=13" "typing_extensions>=4.5"
+Invoke-VenvPython -m pip install "pyinstaller>=6.12" "uv_build>=0.10,<1"
+# The wheel build generates a Unix man page and resolves its own DjVu
+# binding in an isolated environment. Use the editable backend for freezing
+# the checked-out sources with the explicitly supplied Windows wheel.
+Invoke-VenvPython -m pip install --no-build-isolation $BindingWheel -e $ProjectRoot
 
 $env:PATH = "$(Split-Path $DjVuLibreDll);$env:PATH"
 Invoke-VenvPython -c "import struct; import djvu.decode, djvu.sexpr; assert struct.calcsize('P') == 8; print('DjVu bindings imported successfully')"

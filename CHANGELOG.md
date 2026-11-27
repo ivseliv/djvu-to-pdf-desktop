@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Desktop 0.1.10 - 2026-11-27
+
+* Publish completed checkpoints atomically and detect failed page workers.
+* Release image data after each block and apply per-page overrides to the intended pages.
+* Check the source and conversion settings before resuming a job. Respect the overwrite setting when saving the final PDF.
+* Keep active jobs out of recovery and cleanup, and handle cancellation during file transfers.
+
 ## Desktop 0.1.9 - 2026-09-07
 
 * Add real page-image downsampling while preserving physical page dimensions.
