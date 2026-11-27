@@ -53,20 +53,19 @@ before the result is reported as complete.
 
 ## Release packaging
 
-Build each platform on that platform. A frozen app must ship a 64-bit
-DjVuLibre runtime as well as the Python bindings; test it on a clean machine.
+Build the Apple Silicon app on an arm64 Mac with `uv` and
+`brew install djvulibre qpdf poppler`. Run `desktop/macos/build-arm64.sh`.
+The app bundles `ddjvu`, `djvused`, QPDF, their runtime libraries and notices.
+The build verifies its ad-hoc signature and converts a searchable test file
+with a restricted `PATH`. Poppler is used on the build machine to check the resulting text.
 
-Install QPDF with Homebrew on the build machine, then run
-`desktop/macos/build-arm64.sh`. The script embeds the QPDF executable, its
-dynamic library, license, and notices. It sets the desktop version in the app
-metadata, applies an ad-hoc signature, verifies both binaries are arm64, and
-converts a text-bearing fixture with a restricted `PATH` to prove that the app
-does not use Homebrew at runtime.
+To create the matching source archive, commit the source tree used for the build and run the following command in the same build environment.
 
-Produce separate macOS `arm64`, macOS `x86_64`, and Windows `x86_64` builds.
-On macOS, sign and notarize the `.app` before publishing; on Windows, code-sign
-the installer. The Windows build is a release gate because `djvulibre-python`
-needs a compatible 64-bit DjVuLibre runtime.
+```console
+uv run --frozen --no-default-groups --with 'pyinstaller==6.12.0' python desktop/macos/release_materials.py --sources dist/DjVu-to-PDF-0.2.0-sources.tar.gz
+```
+
+Publish this archive alongside the application ZIP in the GitHub release.
 
 For the modern Windows x64 build contract and the deliberately separate
 Windows XP legacy plan, see [windows/README.md](windows/README.md).

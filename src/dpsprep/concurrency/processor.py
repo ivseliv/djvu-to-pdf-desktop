@@ -6,9 +6,9 @@ from contextlib import closing
 from multiprocessing.connection import Connection, wait
 from typing import cast
 
-import djvu.decode
 from rich.progress import Progress
 
+from dpsprep import djvu_cli as decode
 from dpsprep.exceptions import DpsPrepConcurrencyError
 from dpsprep.options import DpsPrepOptions
 from dpsprep.pdf import CHUNK_SIZE, IncrementalChunkAssembler, is_valid_pdf
@@ -31,7 +31,7 @@ TEXT_PROGRESS_PREFIX = '__DPSPREP_TEXT_PROGRESS__ '
 
 
 class SubprocessPageProcessor:
-    def __init__(self, options: DpsPrepOptions, document: djvu.decode.Document) -> None:
+    def __init__(self, options: DpsPrepOptions, document: decode.Document) -> None:
         self.options = options
         self.document = document
 

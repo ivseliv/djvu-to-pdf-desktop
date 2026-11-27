@@ -1,7 +1,6 @@
 import logging
 
-import djvu.decode
-
+from dpsprep import djvu_cli as decode
 from dpsprep.logging import human_readable_size
 from dpsprep.options import DpsPrepOptions
 
@@ -13,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 # Due to some compatibility issues, we only support multiprocessing-based concurrency with explicit message passing.
 # This is discussed in the concurrency notes in the project's wiki.
-def concurrently_process_pages(options: DpsPrepOptions, document: djvu.decode.Document) -> None:
+def concurrently_process_pages(options: DpsPrepOptions, document: decode.Document) -> None:
     djvu_size = options.workdir.src.stat().st_size
     logger.info(f'Processing {options.workdir.src} with {len(document.pages)} pages and size {human_readable_size(djvu_size)} using {options.pool_size} workers.')
 

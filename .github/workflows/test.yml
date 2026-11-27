@@ -34,7 +34,7 @@ jobs:
       if: matrix.os == 'ubuntu-slim'
       run: |
         sudo apt update
-        sudo apt install --yes build-essential pkg-config libdjvulibre-dev libxml2-dev libxslt1-dev qpdf poppler-utils
+        sudo apt install --yes djvulibre-bin qpdf poppler-utils
 
     - name: Install prerequisites on macOS
       if: matrix.os == 'macos-26'

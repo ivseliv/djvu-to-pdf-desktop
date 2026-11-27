@@ -22,7 +22,7 @@ jobs:
     - name: Install prerequisites on Ubuntu
       run: |
         sudo apt update
-        sudo apt install --yes libdjvulibre21 libdjvulibre-dev
+        sudo apt install --yes djvulibre-bin qpdf
 
     - name: Setup uv
       uses: astral-sh/setup-uv@v7

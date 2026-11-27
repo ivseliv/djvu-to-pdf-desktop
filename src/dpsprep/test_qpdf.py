@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING, cast
 
 import pikepdf
 import pytest
-from djvu import sexpr
 
+from dpsprep import djvu_sexpr as sexpr
 from dpsprep.outline.outline import OutlineTransformVisitor
 from dpsprep.pdf import IncrementalChunkAssembler, _write_chunks_to_destination
 from dpsprep.qpdf import _sample_pages, find_qpdf, merge_pdfs, validate_chunk_text, validate_output

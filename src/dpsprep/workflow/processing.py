@@ -1,8 +1,7 @@
 import logging
 from time import time
 
-import djvu.decode
-
+from dpsprep import djvu_cli as decode
 from dpsprep.images import failsafe_save_djvu_page, process_djvu_page
 from dpsprep.logging import human_readable_size
 from dpsprep.options import DEFAULT_IMAGE_MODE, DpsPrepOptions
@@ -15,7 +14,7 @@ from dpsprep.workdir import writing_checkpoint
 logger = logging.getLogger(__name__)
 
 
-def process_page_bg(options: DpsPrepOptions, document: djvu.decode.Document, i: int) -> None:
+def process_page_bg(options: DpsPrepOptions, document: decode.Document, i: int) -> None:
     page_number = i + 1
 
     if options.workdir.get_page_pdf_path(i).exists():
@@ -29,7 +28,7 @@ def process_page_bg(options: DpsPrepOptions, document: djvu.decode.Document, i: 
     start_time = time()
     mode = options.mode_overrides.get_value_for_zero_based_page(i) or DEFAULT_IMAGE_MODE
     dpi_override = options.dpi_overrides.get_value_for_zero_based_page(i)
-    page_bg = process_djvu_page(document.pages[i], mode, i, max_dpi=options.max_dpi, dpi_override=dpi_override)
+    page_bg = process_djvu_page(document.pages[i], mode, max_dpi=options.max_dpi, dpi_override=dpi_override)
     with writing_checkpoint(options.workdir.get_page_pdf_path(i)) as partial:
         failsafe_save_djvu_page(page_bg, partial, options, i)
     pdf_size = options.workdir.get_page_pdf_path(i).stat().st_size
@@ -44,7 +43,7 @@ def process_page_bg(options: DpsPrepOptions, document: djvu.decode.Document, i: 
 
 def process_text(
     options: DpsPrepOptions,
-    document: djvu.decode.Document,
+    document: decode.Document,
     tracker: TextExtractionTracker | None = None,
 ) -> None:
     if is_valid_pdf(options.workdir.text_layer_pdf_path, len(document.pages)):

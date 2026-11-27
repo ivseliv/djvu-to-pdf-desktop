@@ -9,8 +9,8 @@ from dataclasses import asdict
 from time import time
 
 import click
-import djvu.decode
 
+from dpsprep import djvu_cli as decode
 from dpsprep.concurrency import concurrently_process_pages
 from dpsprep.exceptions import DpsPrepConcurrencyError
 from dpsprep.logging import configure_logging, human_readable_size
@@ -40,24 +40,18 @@ from dpsprep.workflow import (
 logger = logging.getLogger(__name__)
 
 
-def open_djvu_document(source: str | pathlib.Path) -> djvu.decode.Document:
-    """Open a DjVu document, retrying one transient DjVuLibre failure.
-
-    DjVuLibre can occasionally report ``JobFailed`` while creating a document
-    for a large bundled DjVu.  A fresh context is cheap and avoids presenting
-    users with a Python traceback for an error that often succeeds on retry.
-    """
+def open_djvu_document(source: str | pathlib.Path) -> decode.Document:
+    """Read page metadata, retrying one transient DjVuLibre failure."""
     for attempt in range(2):
         try:
-            document = djvu.decode.Context().new_document(djvu.decode.FileURI(source))
-            document.decoding_job.wait()
-        except djvu.decode.JobFailed as error:
+            document = decode.Document(source)
+        except decode.JobFailed as error:
             if attempt == 1:
                 raise click.ClickException(
                     'DjVuLibre could not open this document after retrying. '
-                    'The source file was not changed.',
+                    f'{error}',
                 ) from error
-            logger.warning('DjVuLibre could not open the document; retrying once with a fresh context.')
+            logger.warning('DjVuLibre could not open the document; retrying once.')
         else:
             return document
 
@@ -66,7 +60,7 @@ def open_djvu_document(source: str | pathlib.Path) -> djvu.decode.Document:
 
 def process_pages_or_resume(
     options: DpsPrepOptions,
-    document: djvu.decode.Document,
+    document: decode.Document,
     stream_to_dest: bool,
 ) -> None:
     if stream_to_dest and options.workdir.merged_pdf_path.exists():
@@ -200,9 +194,6 @@ def dpsprep(
         process_pages_or_resume(options, document, stream_to_dest)
 
         outline, page_count = prepare_document_combination(document)
-        # Each DjVu document holds decoded page state and native caches. Free
-        # those before the final disk-space check and QPDF merge; on macOS
-        # this also releases several GiB of transient swap/purgeable storage.
         del document
         gc.collect()
         combine_prepared_document(options, outline, page_count)

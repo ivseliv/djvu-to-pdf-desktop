@@ -2,33 +2,17 @@ import logging
 import pathlib
 from typing import NamedTuple
 
-import djvu.decode
 import PIL.features
-from PIL import Image, ImageOps
+from PIL import Image
 
+from dpsprep import djvu_cli as decode
 from dpsprep.options import DpsPrepOptions, ImageMode
 
 
 logger = logging.getLogger(__name__)
 
 
-djvu_pixel_formats = {
-    ImageMode.RGB: djvu.decode.PixelFormatRgb(byte_order='RGB'),
-    ImageMode.GRAYSCALE: djvu.decode.PixelFormatGrey(),
-    ImageMode.BITONAL: djvu.decode.PixelFormatPackedBits('>'),
-}
-
-
-for pixel_format in djvu_pixel_formats.values():
-    pixel_format.rows_top_to_bottom = 1
-    pixel_format.y_top_to_bottom = 0
-
-
-pil_modes = {
-    ImageMode.RGB: 'RGB',
-    ImageMode.GRAYSCALE: 'L',
-    ImageMode.BITONAL: '1',
-}
+image_modes = {'RGB': ImageMode.RGB, 'L': ImageMode.GRAYSCALE, '1': ImageMode.BITONAL}
 
 
 class ProcessedPageBackground(NamedTuple):
@@ -38,65 +22,26 @@ class ProcessedPageBackground(NamedTuple):
 
 
 def process_djvu_page(
-    page: djvu.decode.Page,
+    page: decode.Page,
     mode: ImageMode,
-    i: int,
     max_dpi: int | None = None,
     dpi_override: int | None = None,
 ) -> ProcessedPageBackground:
-    page_job = page.decode(wait=True)
-    source_width, source_height = page_job.size
-    source_dpi = dpi_override or page_job.dpi
+    source_width, source_height = page.size
+    source_dpi = dpi_override or page.dpi
     resolution = min(source_dpi, max_dpi) if max_dpi is not None else source_dpi
     scale = resolution / source_dpi
     width = max(1, round(source_width * scale))
     height = max(1, round(source_height * scale))
-    rect = (0, 0, width, height)
-
-    if mode == ImageMode.INFER:
-        mode = ImageMode.BITONAL if page_job.type == djvu.decode.PAGE_TYPE_BITONAL else ImageMode.RGB
-
-    row_bytes = {ImageMode.RGB: width * 3, ImageMode.GRAYSCALE: width, ImageMode.BITONAL: (width + 7) // 8}
-    buffer = bytearray(row_bytes[mode] * height)
+    image = page.render(mode, (width, height))
+    mode = image_modes[image.mode]
     if mode == ImageMode.BITONAL:
         if not PIL.features.check_codec('libtiff'):
             logger.warning('Bitonal image compression may suffer because Pillow has been built without libtiff support.')
     elif not PIL.features.check_codec('jpg'):
         logger.warning('Multitonal image compression may suffer because Pillow has been built without libjpeg support.')
 
-    try:
-        page_job.render(
-            # RENDER_COLOR is simply a default value and doesn't actually imply colors
-            mode=djvu.decode.RENDER_COLOR,
-            page_rect=rect,
-            render_rect=rect,
-            pixel_format=djvu_pixel_formats[mode],
-            buffer=buffer,
-        )
-    except djvu.decode.NotAvailable:
-        logger.warning(f'libdjvu claims that data for page {i + 1} is not available. Producing a blank page.')
-        image = Image.new(
-            pil_modes[ImageMode.BITONAL],
-            (width, height),
-            1,
-        )
-
-        return ProcessedPageBackground(image, resolution, ImageMode.BITONAL)
-
-    image = Image.frombuffer(
-        pil_modes[mode],
-        (width, height),
-        buffer,
-        'raw',
-    )
-
-    return ProcessedPageBackground(
-        # I have experimentally determined that we need to invert the black-and-white images. -- Ianis, 2023-05-13
-        # See also https://github.com/kcroker/dpsprep/issues/16
-        ImageOps.invert(image) if mode == ImageMode.BITONAL else image,
-        resolution,
-        mode,
-    )
+    return ProcessedPageBackground(image, resolution, mode)
 
 
 def failsafe_save_djvu_page(page_bg: ProcessedPageBackground, target: pathlib.Path, options: DpsPrepOptions, i: int) -> None:
@@ -106,7 +51,7 @@ def failsafe_save_djvu_page(page_bg: ProcessedPageBackground, target: pathlib.Pa
     # JPEG quality is intentionally irrelevant for one-bit pages. Passing it
     # to Pillow's TIFF-backed PDF encoder raises ValueError and used to emit
     # two warnings for every bitonal page in large books.
-    if page_bg.pil_image.mode == pil_modes[ImageMode.BITONAL]:
+    if page_bg.mode == ImageMode.BITONAL:
         quality = None
 
     if quality is not None:

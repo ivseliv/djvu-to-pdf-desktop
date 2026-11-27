@@ -3,8 +3,7 @@ import signal
 import time
 from typing import TYPE_CHECKING, Protocol
 
-import djvu.decode
-
+from dpsprep import djvu_cli as decode
 from dpsprep.options import DpsPrepOptions
 from dpsprep.outline import TextExtractionTracker
 from dpsprep.workflow import process_page_bg, process_text
@@ -82,41 +81,28 @@ class SubprocessWorker:
         base_logger.handlers.clear()
         base_logger.addHandler(SubprocessWorkerLoggerHandler(self.child_conn))
 
-    def process_text(self) -> None:
-        self.setup_child_process()
-
-        # The document must be read anew because the underlying structures are not properly copied.
-        document = djvu.decode.Context().new_document(
-            djvu.decode.FileURI(self.options.workdir.src),
-        )
-        document.decoding_job.wait()
-
+    def process_text(self, document: decode.Document) -> None:
         tracker = SubprocessTextExtractionTracker(self.child_conn)
         process_text(self.options, document, tracker)
         self.child_conn.send(TextLayerFinishedMessage())
 
     def process_stripe(self, worker_id: int, page_limit: SharedPageLimit | None, resume_page: int) -> None:
         try:
+            self.setup_child_process()
+            document = decode.Document(self.options.workdir.src)
             if worker_id == 0 and not self.options.no_text:
-                self.process_text()
-            self.process_page_bg(worker_id, page_limit, resume_page)
+                self.process_text(document)
+            self.process_page_bg(document, worker_id, page_limit, resume_page)
         finally:
             self.child_conn.close()
 
     def process_page_bg(
         self,
+        document: decode.Document,
         worker_id: int,
         page_limit: SharedPageLimit | None = None,
         resume_page: int = 0,
     ) -> None:
-        self.setup_child_process()
-
-        # The document must be read anew because the underlying structures are not properly copied.
-        document = djvu.decode.Context().new_document(
-            djvu.decode.FileURI(self.options.workdir.src),
-        )
-        document.decoding_job.wait()
-
         first_page = first_worker_page(worker_id, self.options.pool_size, resume_page)
         for i in range(first_page, len(document.pages), self.options.pool_size):
             while page_limit is not None and i >= page_limit.value:

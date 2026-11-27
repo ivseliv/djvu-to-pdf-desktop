@@ -10,11 +10,7 @@ Target: 64-bit Windows 10 and Windows 11.  Build on 64-bit Windows with
 CPython 3.11, 3.12, or 3.13.  PyInstaller is not a cross-compiler, so a macOS
 or Linux build cannot make a valid Windows executable.
 
-`dpsprep` needs the native `djvulibre-python` binding.  Its upstream project
-does not publish a Windows wheel, therefore the release process uses a
-separately built and tested wheel rather than hoping `pip` can build one during
-packaging.  The wheel and DLL must use the same architecture, Python ABI and
-DjVuLibre version.
+The converter runs DjVuLibre's x64 command-line tools as child processes.
 
 The standalone QPDF runtime is also required. Extract its Windows x64 package
 under `third_party\windows-x64\qpdf` so that `bin\qpdf.exe` and all companion
@@ -27,22 +23,21 @@ is intentionally ignored by Git):
 ```text
 third_party/windows-x64/djvulibre/
 └── bin/
-    └── libdjvulibre-21.dll
+    ├── ddjvu.exe
+    ├── djvused.exe
+    └── (their runtime DLLs)
 ```
 
-Include any DLL dependencies required by that runtime in the same `bin`
-folder.  Keep the matching `djvulibre-python` wheel outside the repository or
-in a protected release-artifacts store.  It must import `djvu.decode` and
-`djvu.sexpr` under the chosen x64 CPython version before it is accepted.
+Use the tools and DLLs from the same x64 distribution.
 
 In PowerShell from the repository root:
 
 ```powershell
-.\desktop\windows\build-x64.ps1 -BindingWheel C:\release-input\djvulibre_python-0.9.3-cp311-cp311-win_amd64.whl -Clean
+.\desktop\windows\build-x64.ps1 -Clean
 ```
 
 The output is `dist\windows-x64\DjVu to PDF\DjVu to PDF.exe`. The build script
-checks the native bindings and bundled QPDF, starts the packaged worker, then
+checks the bundled QPDF, starts the packaged worker, then
 converts and validates a text-bearing DjVu fixture. Release QA must still test
 the folder on a clean Windows machine before signing an installer.
 

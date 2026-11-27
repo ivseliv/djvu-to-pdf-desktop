@@ -13,7 +13,6 @@ license-files = ["LICENSES/GPL-3.0-or-later.txt", "LICENSES/CC0-1.0.txt"]
 
 dependencies = [
   "click (>=8)",
-  "djvulibre-python (>=0.9.3)",
   "fpdf2 (>=2.8.6)",
   "pdfrw (>=0.4)",
   "pikepdf (>=10.5.1)",
@@ -145,7 +144,6 @@ strict_bytes = false
 [[tool.mypy.overrides]]
 module = [
   "click_man.*",
-  "djvu.*",
   "pdfrw.*",
   "uv_build.*",
 ]

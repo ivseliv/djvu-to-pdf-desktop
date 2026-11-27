@@ -269,7 +269,7 @@ def combine_pdfs_on_fs_with_text(options: DpsPrepOptions, outline: pdfrw.Indirec
         merger.add(image_page).render()
         writer.addpage(text_page)
 
-    writer.trailer.Root.Outlines = outline
+    _attach_legacy_outline(writer, outline)
     writer.write(options.workdir.combined_pdf_path)
 
 
@@ -285,5 +285,23 @@ def combine_pdfs_on_fs_without_text(options: DpsPrepOptions, outline: pdfrw.Indi
         image_page = image_pdf.pages[0]
         writer.addpage(image_page)
 
-    writer.trailer.Root.Outlines = outline
+    _attach_legacy_outline(writer, outline)
     writer.write(options.workdir.combined_pdf_without_text_path)
+
+
+def _attach_legacy_outline(writer: pdfrw.PdfWriter, outline: pdfrw.IndirectPdfDict) -> None:
+    # In a local GoTo action, PDF requires an indirect page reference. The
+    # streaming writer resolves these same zero-based indices via pikepdf.
+    node = outline.First
+    while node is not None:
+        if node.A is not None:
+            node.A.D[0] = writer.pagearray[node.A.D[0]]
+        if node.First is not None:
+            node = node.First
+            continue
+        while node is not outline and node.Next is None:
+            node = node.Parent
+        node = node.Next
+    if outline.First is not None:
+        outline.Type = pdfrw.PdfName.Outlines
+        writer.trailer.Root.Outlines = outline

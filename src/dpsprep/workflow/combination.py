@@ -1,9 +1,9 @@
 import logging
 import shutil
 
-import djvu.decode
 import pdfrw
 
+from dpsprep import djvu_cli as decode
 from dpsprep.ocrmypdf_adapter import perform_ocr
 from dpsprep.options import DpsPrepOptions
 from dpsprep.outline import extract_outline_as_pdfdict
@@ -14,11 +14,11 @@ logger = logging.getLogger(__name__)
 
 
 def prepare_document_combination(
-    document: djvu.decode.Document,
+    document: decode.Document,
 ) -> tuple[pdfrw.IndirectPdfDict, int]:
     outline = pdfrw.IndirectPdfDict()
 
-    if len(document.outline.sexpr) > 0:
+    if document.outline:
         logger.info('Processing metadata.')
         outline = extract_outline_as_pdfdict(document)
         logger.info('Metadata processed.')
@@ -61,7 +61,7 @@ def combine_prepared_document(
         combine_pdfs_on_fs_with_text(options, outline, page_count)
 
 
-def combine_document(options: DpsPrepOptions, document: djvu.decode.Document) -> None:
+def combine_document(options: DpsPrepOptions, document: decode.Document) -> None:
     """Compatibility wrapper for callers that do not need early DjVu release."""
     outline, page_count = prepare_document_combination(document)
     combine_prepared_document(options, outline, page_count)

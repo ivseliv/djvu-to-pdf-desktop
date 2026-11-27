@@ -370,18 +370,11 @@ wheels = [
 ]
 
 [[package]]
-name = "djvulibre-python"
-version = "0.9.3"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ac/b9/90f437786f185d1012da3988f6100de7a88146d564a0aae663f60af48ab1/djvulibre_python-0.9.3.tar.gz", hash = "sha256:efe3c816b40b2bf5fda81cced2b44e57e86dfe608cd89e5acfd3596191ed5248", size = 90560, upload-time = "2025-05-16T15:12:34.446Z" }
-
-[[package]]
 name = "dpsprep"
 version = "2.8.3"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
-    { name = "djvulibre-python" },
     { name = "fpdf2" },
     { name = "pdfrw" },
     { name = "pikepdf" },
@@ -434,7 +427,6 @@ typing = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8" },
-    { name = "djvulibre-python", specifier = ">=0.9.3" },
     { name = "dpsprep", extras = ["ocr"], marker = "extra == 'all'", specifier = ">=0.0.0" },
     { name = "dpsprep", extras = ["ocr"], marker = "extra == 'compress'", specifier = ">=0.0.0" },
     { name = "fpdf2", specifier = ">=2.8.6" },

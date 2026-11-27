@@ -3,7 +3,7 @@
 import logging
 from typing import Generic, TypeVar
 
-import djvu.sexpr
+from dpsprep import djvu_sexpr as sexpr
 
 
 T = TypeVar('T')
@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 
 
 class SExpressionVisitor(Generic[R]):
-    def visit_list(self, node: djvu.sexpr.ListExpression, **kwargs: T) -> R | None:
-        if len(node) > 0 and isinstance(node[0], djvu.sexpr.SymbolExpression):
+    def visit_list(self, node: sexpr.ListExpression, **kwargs: T) -> R | None:
+        if len(node) > 0 and isinstance(node[0], sexpr.SymbolExpression):
             method = getattr(self, f'visit_list_{node[0]}', None)
             if method is None:
                 logger.warning(f"Don't know how to visit ListExpression of type {str(node[0])!r}.")
@@ -25,21 +25,21 @@ class SExpressionVisitor(Generic[R]):
         return None
 
     # ruff: ignore[unused-method-argument]
-    def visit_other(self, node: djvu.sexpr.Expression, **kwargs: T) -> R | None:
+    def visit_other(self, node: sexpr.Expression, **kwargs: T) -> R | None:
         logger.warning(f"Don't know how to visit S-expression type {type(node)!r}.")
         return None
 
-    def visit(self, node: djvu.sexpr.Expression, **kwargs: T) -> R | None:
-        if isinstance(node, djvu.sexpr.IntExpression):
+    def visit(self, node: sexpr.Expression, **kwargs: T) -> R | None:
+        if isinstance(node, sexpr.IntExpression):
             if hasattr(self, 'visit_int'):
                 return self.visit_int(node, **kwargs)
             logger.warning("Don't know how to visit IntExpression.")
             return None
-        if isinstance(node, djvu.sexpr.StringExpression):
+        if isinstance(node, sexpr.StringExpression):
             if hasattr(self, 'visit_string'):
                 return self.visit_string(node, **kwargs)
             logger.warning("Don't know how to visit StringExpression.")
             return None
-        if isinstance(node, djvu.sexpr.ListExpression):
+        if isinstance(node, sexpr.ListExpression):
             return self.visit_list(node, **kwargs)
         return self.visit_other(node, **kwargs)

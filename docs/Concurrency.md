@@ -1,4 +1,5 @@
-The conversion of different pages is largely independent, so it makes sense to process them concurrently. Unfortunately, [djvulibre-python](https://github.com/FriedrichFroebel/python-djvulibre) does not support free-threading nor subinterpreters, so the only possibility is to use multiprocessing.
+The conversion of different pages is largely independent. Worker processes
+read page metadata through `djvused` and render images through `ddjvu`.
 
 This comes with obvious drawbacks:
 

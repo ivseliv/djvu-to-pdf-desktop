@@ -6,18 +6,11 @@ Builds the modern Windows x64 edition of DjVu to PDF.
 This script must run on a 64-bit Windows machine.  PyInstaller is not a
 cross-compiler, so running it on macOS or Linux cannot produce a Windows EXE.
 
-The DjVu binding is supplied as a separately tested wheel.  The upstream
-djvulibre-python project does not publish Windows wheels, so accepting a wheel
-explicitly prevents pip from silently attempting a different, unverified
-native build during a release.
+Provide DjVuLibre's x64 command-line tools and their companion DLLs in bin.
 #>
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
-    [ValidateScript({ Test-Path $_ -PathType Leaf })]
-    [string]$BindingWheel,
-
     [string]$DjVuLibreRoot = (Join-Path $PSScriptRoot "..\\..\\third_party\\windows-x64\\djvulibre"),
 
     [string]$QpdfRoot = (Join-Path $PSScriptRoot "..\\..\\third_party\\windows-x64\\qpdf"),
@@ -36,7 +29,7 @@ $BuildRoot = Join-Path $ProjectRoot "build\\windows-x64"
 $DistRoot = Join-Path $ProjectRoot "dist\\windows-x64"
 $VenvRoot = Join-Path $BuildRoot ".venv"
 $VenvPython = Join-Path $VenvRoot "Scripts\\python.exe"
-$DjVuLibreDll = Join-Path $DjVuLibreRoot "bin\\libdjvulibre-21.dll"
+$DjVuBin = Join-Path $DjVuLibreRoot "bin"
 $QpdfExe = Join-Path $QpdfRoot "bin\\qpdf.exe"
 
 function Invoke-SystemPython {
@@ -65,15 +58,10 @@ function Invoke-VenvPython {
 if (-not [Environment]::Is64BitOperatingSystem) {
     throw "A 64-bit Windows installation is required for the Windows x64 edition."
 }
-if (-not (Test-Path $DjVuLibreDll -PathType Leaf)) {
-    throw @"
-DjVuLibre runtime not found: $DjVuLibreDll
-
-Provide the matching 64-bit runtime at:
-  third_party\\windows-x64\\djvulibre\\bin\\libdjvulibre-21.dll
-
-See desktop\\windows\\README.md for the required native-runtime contract.
-"@
+foreach ($Tool in @("ddjvu.exe", "djvused.exe")) {
+    if (-not (Test-Path (Join-Path $DjVuBin $Tool) -PathType Leaf)) {
+        throw "Missing DjVuLibre tool $Tool in $DjVuBin"
+    }
 }
 if (-not (Test-Path $QpdfExe -PathType Leaf)) {
     throw "QPDF runtime not found: $QpdfExe. Extract the official Windows x64 QPDF package under third_party\\windows-x64\\qpdf."
@@ -93,13 +81,7 @@ Invoke-SystemPython -m venv $VenvRoot
 
 Invoke-VenvPython -m pip install --upgrade pip
 Invoke-VenvPython -m pip install "pyinstaller>=6.12" "uv_build>=0.10,<1"
-# The wheel build generates a Unix man page and resolves its own DjVu
-# binding in an isolated environment. Use the editable backend for freezing
-# the checked-out sources with the explicitly supplied Windows wheel.
-Invoke-VenvPython -m pip install --no-build-isolation $BindingWheel -e $ProjectRoot
-
-$env:PATH = "$(Split-Path $DjVuLibreDll);$env:PATH"
-Invoke-VenvPython -c "import struct; import djvu.decode, djvu.sexpr; assert struct.calcsize('P') == 8; print('DjVu bindings imported successfully')"
+Invoke-VenvPython -m pip install --no-build-isolation -e $ProjectRoot
 
 Invoke-VenvPython -m PyInstaller `
     --noconfirm `
@@ -110,14 +92,11 @@ Invoke-VenvPython -m PyInstaller `
     --workpath (Join-Path $BuildRoot "pyinstaller") `
     --specpath $BuildRoot `
     --paths (Join-Path $ProjectRoot "src") `
-    --add-binary "$DjVuLibreDll;." `
     --add-data "$(Join-Path $ProjectRoot 'LICENSES');LICENSES" `
     --collect-all dpsprep `
     --collect-all dpsprep_desktop `
-    --collect-all djvu `
     --collect-all pikepdf `
-    --hidden-import djvu.decode `
-    --hidden-import djvu.sexpr `
+    --exclude-module djvu `
     (Join-Path $ProjectRoot "desktop\\launcher.py")
 
 $App = Join-Path $DistRoot "DjVu to PDF\\DjVu to PDF.exe"
@@ -137,9 +116,12 @@ if (Test-Path (Join-Path $QpdfRoot "LICENSE.txt")) {
 if (Test-Path (Join-Path $QpdfRoot "NOTICE.md")) {
     Copy-Item -Force (Join-Path $QpdfRoot "NOTICE.md") (Join-Path $LicenseDirectory "QPDF-NOTICE.md")
 }
-# DjVuLibre builds can depend on companion DLLs (for example a runtime library).
-# Copy every explicitly staged runtime DLL, not only the primary library.
-Get-ChildItem -Path (Split-Path $DjVuLibreDll) -Filter "*.dll" -File | Copy-Item -Destination $AppDirectory -Force
+$BundledDjvu = Join-Path $AppDirectory "djvulibre\bin"
+New-Item -ItemType Directory -Force -Path $BundledDjvu | Out-Null
+foreach ($Tool in @("ddjvu.exe", "djvused.exe")) {
+    Copy-Item (Join-Path $DjVuBin $Tool) $BundledDjvu
+}
+Get-ChildItem $DjVuBin -Filter "*.dll" -File | Copy-Item -Destination $BundledDjvu -Force
 
 & $App --run-dpsprep --help
 if ($LASTEXITCODE -ne 0) {
