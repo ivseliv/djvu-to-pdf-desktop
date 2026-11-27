@@ -39,7 +39,9 @@ bookmark geometry retains the original physical page dimensions.
 For large files, the desktop worker keeps at most two 64-page windows in flight,
 assembles completed pages into blocks, and removes their one-page PDFs at once.
 Standalone QPDF then joins the blocks with bounded memory.  The GUI owns a
-persistent job directory in `/var/tmp/djvu-to-pdf-jobs`, can resume an
+persistent per-user job directory in `/var/tmp/djvu-to-pdf-jobs-<uid>` on macOS
+and Linux (existing privately owned `/var/tmp/djvu-to-pdf-jobs` directories
+are retained). Windows uses the user's temporary directory. The GUI can resume an
 interrupted conversion, and offers explicit cleanup.  On the same disk it
 publishes the verified result with an atomic rename, so saving does not require
 a third full copy of a very large PDF.

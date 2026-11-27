@@ -6,6 +6,7 @@ import filecmp
 import json
 import os
 import shutil
+import stat
 import tempfile
 import uuid
 from contextlib import contextmanager
@@ -24,12 +25,30 @@ if TYPE_CHECKING:
     from .core import ConversionSettings
 
 
+def _owned_directory(path: Path) -> bool:
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return False
+    return stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid() and not info.st_mode & 0o022
+
+
+def _posix_jobs_root(parent: Path) -> Path:
+    legacy = parent / 'djvu-to-pdf-jobs'
+    root = legacy if _owned_directory(legacy) else parent / f'djvu-to-pdf-jobs-{os.getuid()}'
+    root.mkdir(mode=0o700, exist_ok=True)
+    if not _owned_directory(root):
+        raise PermissionError(f'Небезопасная папка временных заданий: {root}')
+    root.chmod(0o700)
+    return root
+
+
 def jobs_root() -> Path:
     override = os.environ.get('DPSPREP_JOBS_ROOT')
-    root = Path(override) if override else (
-        Path('/var/tmp/djvu-to-pdf-jobs') if os.name == 'posix' else Path(tempfile.gettempdir()) / 'djvu-to-pdf-jobs'
-    )
-    root.mkdir(parents=True, exist_ok=True)
+    if override is None and os.name == 'posix':
+        return _posix_jobs_root(Path('/var/tmp'))
+    root = Path(override) if override else Path(tempfile.gettempdir()) / 'djvu-to-pdf-jobs'
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
     return root
 
 

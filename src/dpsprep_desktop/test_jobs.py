@@ -1,3 +1,5 @@
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -5,6 +7,7 @@ import pytest
 from .core import ConversionSettings
 from .jobs import (
     JobBusyError,
+    _posix_jobs_root,
     create_job,
     job_size,
     lock_job,
@@ -14,6 +17,19 @@ from .jobs import (
     remove_job,
     write_manifest,
 )
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='POSIX user-owned working directories')
+def test_private_jobs_root_and_legacy_recovery(tmp_path: Path) -> None:
+    legacy = tmp_path / 'djvu-to-pdf-jobs'
+    legacy.mkdir(mode=0o755)
+    assert _posix_jobs_root(tmp_path) == legacy
+    assert stat.S_IMODE(legacy.stat().st_mode) == 0o700
+    legacy.chmod(0o777)
+    user_root = _posix_jobs_root(tmp_path)
+    assert user_root.name == f'djvu-to-pdf-jobs-{os.getuid()}'
+    assert stat.S_IMODE(user_root.stat().st_mode) == 0o700
+    assert stat.S_IMODE(legacy.stat().st_mode) == 0o777
 
 
 def test_job_can_be_recovered_and_removed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
